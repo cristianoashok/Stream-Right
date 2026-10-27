@@ -553,6 +553,10 @@ class CandidatePlanner(
             )
         }
 
+        Logger.i(
+            "Plan",
+            "PLAN ${media.kind} \"${media.title}\" ids[tmdb=${bridged.tmdbId} anilist=${bridged.anilistId} mal=${bridged.malId}] S${seasonNum}E${episodeNum} -> ${candidates.distinctBy { it.embedUrl }.size} servers: ${candidates.distinctBy { it.embedUrl }.joinToString(", ") { it.label }}"
+        )
         return ResolvePlan(
             media = media,
             episode = episode,

@@ -70,16 +70,19 @@ object Logger {
     var verboseReqLoggingEnabled: Boolean = false
 
     fun d(tag: String, message: String) {
+        DebugCapture.record("D", tag, message)
         if (BuildConfig.DEBUG) {
             Log.d("$GLOBAL_TAG:$tag", message)
         }
     }
 
     fun i(tag: String, message: String) {
+        DebugCapture.record("I", tag, message)
         Log.i("$GLOBAL_TAG:$tag", message)
     }
 
     fun w(tag: String, message: String, throwable: Throwable? = null) {
+        DebugCapture.record("W", tag, message)
         if (throwable != null) {
             Log.w("$GLOBAL_TAG:$tag", message, throwable)
         } else {
@@ -88,6 +91,7 @@ object Logger {
     }
 
     fun e(tag: String, message: String, throwable: Throwable? = null) {
+        DebugCapture.record("E", tag, message)
         if (throwable != null) {
             Log.e("$GLOBAL_TAG:$tag", message, throwable)
         } else {

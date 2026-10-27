@@ -17,6 +17,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.victor.stream.core.DebugCapture
 import com.victor.stream.di.ServiceLocator
 import com.victor.stream.domain.MediaItemModel
 import com.victor.stream.resolver.WebViewStreamResolver
@@ -33,6 +34,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ServiceLocator.init(applicationContext)
+        DebugCapture.attach(applicationContext)
         (ServiceLocator.streamResolver as? WebViewStreamResolver)?.attachHostToActivity(this)
 
         setContent {

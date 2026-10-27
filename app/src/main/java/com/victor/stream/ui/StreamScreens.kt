@@ -47,6 +47,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import com.victor.stream.core.DebugCaptureCard
 import com.victor.stream.data.GENRE_MAP
 import com.victor.stream.data.PrefsStore
 import com.victor.stream.di.ServiceLocator
@@ -1974,6 +1975,8 @@ fun SettingsScreen(
         }
 
         AniListSettingsCard(onAccountChanged = onAccountChanged)
+
+        DebugCaptureCard()
     }
 }
 
