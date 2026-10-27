@@ -544,6 +544,18 @@ class CatalogRepository(
 
     fun getFallbackSamples(): List<MediaItemModel> = fallbackSampleList
 
+    // Today's date as yyyy-MM-dd (ISO dates compare correctly as plain strings).
+    private val todayIso: String by lazy {
+        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+    }
+
+    /** True only if the title has already been released/aired (hide upcoming ones). */
+    private fun TmdbMediaDto.isReleased(): Boolean {
+        val date = (releaseDate ?: firstAirDate)?.trim().orEmpty()
+        if (date.length < 10) return false // no real date yet => not released
+        return date <= todayIso
+    }
+
     fun mapTmdbDtoToDomain(dto: TmdbMediaDto, forcedMediaType: String? = null): MediaItemModel {
         val rawTitle = dto.title ?: dto.name ?: "Untitled"
         val isSeries = (forcedMediaType ?: dto.mediaType) == "tv" || (dto.title == null && dto.name != null)
@@ -691,7 +703,7 @@ class CatalogRepository(
         val pAniDef = async { fetchPopularAnime() }
 
         fun List<TmdbMediaDto>.toDomainList(forcedType: String? = null): List<MediaItemModel> =
-            filter { !it.posterPath.isNullOrBlank() }.map { mapTmdbDtoToDomain(it, forcedType) }
+            filter { !it.posterPath.isNullOrBlank() && it.isReleased() }.map { mapTmdbDtoToDomain(it, forcedType) }
 
         HomeCatalogBundle(
             trendingAll = tAllDef.await().toDomainList(),
@@ -716,7 +728,7 @@ class CatalogRepository(
                 withOriginalLanguage = "ja",
                 sortBy = "popularity.desc"
             ).results
-                .filter { !it.posterPath.isNullOrBlank() }
+                .filter { !it.posterPath.isNullOrBlank() && it.isReleased() }
                 .map { mapTmdbDtoToDomain(it, "tv") }
                 .distinctBy { it.title.lowercase() }
         } catch (e: Exception) {
@@ -735,7 +747,7 @@ class CatalogRepository(
                 withOriginalLanguage = "ja",
                 sortBy = "vote_count.desc"
             ).results
-                .filter { !it.posterPath.isNullOrBlank() }
+                .filter { !it.posterPath.isNullOrBlank() && it.isReleased() }
                 .map { mapTmdbDtoToDomain(it, "tv") }
                 .distinctBy { it.title.lowercase() }
         } catch (e: Exception) {
@@ -840,7 +852,7 @@ class CatalogRepository(
             if (query.isNotBlank()) {
                 val q = query.trim()
                 val rawResults = NetworkApis.tmdb.searchMulti(apiKey, q).results
-                    .filter { it.mediaType != "person" && !it.posterPath.isNullOrBlank() }
+                    .filter { it.mediaType != "person" && !it.posterPath.isNullOrBlank() && it.isReleased() }
                     .map { mapTmdbDtoToDomain(it) }
                 combined.addAll(rawResults)
             } else {
@@ -854,13 +866,13 @@ class CatalogRepository(
                     }
                     if (selectedType == "All" || selectedType == "Movies") {
                         val movs = NetworkApis.tmdb.discoverMovies(apiKey, genreId, yearInt).results
-                            .filter { !it.posterPath.isNullOrBlank() }
+                            .filter { !it.posterPath.isNullOrBlank() && it.isReleased() }
                             .map { mapTmdbDtoToDomain(it, "movie") }
                         combined.addAll(movs)
                     }
                     if (selectedType == "All" || selectedType == "Series") {
                         val tvs = NetworkApis.tmdb.discoverTv(apiKey, genreId, yearInt).results
-                            .filter { !it.posterPath.isNullOrBlank() }
+                            .filter { !it.posterPath.isNullOrBlank() && it.isReleased() }
                             .map { mapTmdbDtoToDomain(it, "tv") }
                         combined.addAll(tvs)
                     }

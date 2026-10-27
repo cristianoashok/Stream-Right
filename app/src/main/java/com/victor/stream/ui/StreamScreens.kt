@@ -428,20 +428,20 @@ fun Modifier.tvRememberedFocus(
     // Phones are driven by touch, so only steer focus automatically on TV
     if (memory == null || !isTv) return@composed this
     val requester = remember { FocusRequester() }
+    var hasFocusNow by remember { mutableStateOf(false) }
     val wantsFocus = memory.pendingKey == key ||
             (memory.pendingKey == TvFocusMemory.FIRST_ITEM && isFirstRow && index == 0)
     LaunchedEffect(wantsFocus) {
         if (wantsFocus) {
-            // On return from a movie the row may not be laid out on the first frame, so keep
-            // trying for a short while until this poster actually takes focus — otherwise
-            // focus is left sitting on the top menu bar.
+            // On return from a movie, the top menu button grabs focus first. Keep re-requesting
+            // (up to ~2.5s) until THIS poster actually holds focus — one request can "succeed"
+            // yet lose focus again a frame later, which is why focus kept ending on the menu bar.
             var attempts = 0
-            while (attempts < 25 && memory.pendingKey != null) {
-                delay(60)
-                if (runCatching { requester.requestFocus() }.isSuccess) {
-                    memory.pendingKey = null
-                    break
-                }
+            while (attempts < 25 && !hasFocusNow &&
+                (memory.pendingKey == key || memory.pendingKey == TvFocusMemory.FIRST_ITEM)
+            ) {
+                runCatching { requester.requestFocus() }
+                delay(100)
                 attempts++
             }
         }
@@ -449,10 +449,13 @@ fun Modifier.tvRememberedFocus(
     this
         .focusRequester(requester)
         .onFocusChanged {
+            hasFocusNow = it.hasFocus
             if (it.hasFocus) {
                 memory.lastFocusedKey = key
                 // This poster got focus (the one we wanted) — stop any pending request.
-                if (memory.pendingKey == key) memory.pendingKey = null
+                if (memory.pendingKey == key || memory.pendingKey == TvFocusMemory.FIRST_ITEM) {
+                    memory.pendingKey = null
+                }
             }
         }
 }
@@ -689,7 +692,7 @@ fun HomeScreenWithSidebar(
                             )
                         },
                         label = {
-                            Text("Settings and account", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Settings and Account", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                         },
                         selected = false,
                         onClick = {
