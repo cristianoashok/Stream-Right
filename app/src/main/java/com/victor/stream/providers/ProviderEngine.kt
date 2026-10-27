@@ -51,7 +51,7 @@ data class ProviderDescriptor(
 
 class ProviderRegistry {
     private val runtimeScores = ConcurrentHashMap<String, Float>()
-    @Volatile var lastWorkingGeneralProviderId: String = "vidlink"
+    @Volatile var lastWorkingGeneralProviderId: String = "vidfast"
 
     private val descriptors: List<ProviderDescriptor> = listOf(
         // --- MOVIE & TV PROVIDERS ---
@@ -67,7 +67,7 @@ class ProviderRegistry {
             trust = ProviderTrust.INSTANT,
             timeoutMs = 7_500L,
             hedgeDelayMs = 2_800L,
-            baseReliability = 0.95f
+            baseReliability = 0.35f
         ),
         ProviderDescriptor(
             id = "vidlink",
@@ -81,7 +81,7 @@ class ProviderRegistry {
             trust = ProviderTrust.INSTANT,
             timeoutMs = 8_000L,
             hedgeDelayMs = 3_000L,
-            baseReliability = 0.94f
+            baseReliability = 0.30f
         ),
         ProviderDescriptor(
             id = "vidfast",
@@ -95,7 +95,7 @@ class ProviderRegistry {
             trust = ProviderTrust.SETTLE,
             timeoutMs = 8_000L,
             hedgeDelayMs = 3_000L,
-            baseReliability = 0.90f
+            baseReliability = 0.97f
         ),
         ProviderDescriptor(
             id = "videasy",

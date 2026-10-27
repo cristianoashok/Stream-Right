@@ -60,6 +60,7 @@ import com.victor.stream.player.VIDEO_QUALITY_OPTIONS
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 private fun Context.findActivity(): Activity? {
     var ctx = this
@@ -339,14 +340,17 @@ fun PlayerScreen(
                     val remaining = activeSession.plan.candidates.filter {
                         it.providerId != activeSession.stream.providerId &&
                                 it.providerId !in activeSession.failedProviderIds
-                    }
+                    }.take(4) // Only pre-check the few best backups; most servers are dead, so don't churn through all of them.
                     if (remaining.isNotEmpty()) {
                         backgroundHarvestJob = scope.launch {
                             val bgPlan = activeSession.plan.copy(candidates = remaining)
-                            ServiceLocator.resolveStreamUseCase.resolve(bgPlan, harvestAll = true).collect { ev ->
-                                if (ev is ResolverEvent.Captured) {
-                                    verifiedServersVersion++
-                                    playbackController.updateSubtitlesList(ev.stream.subtitles)
+                            // Cap the whole background harvest so it can't keep hammering dead servers while watching.
+                            withTimeoutOrNull(30_000L) {
+                                ServiceLocator.resolveStreamUseCase.resolve(bgPlan, harvestAll = true).collect { ev ->
+                                    if (ev is ResolverEvent.Captured) {
+                                        verifiedServersVersion++
+                                        playbackController.updateSubtitlesList(ev.stream.subtitles)
+                                    }
                                 }
                             }
                         }

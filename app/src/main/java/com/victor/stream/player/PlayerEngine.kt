@@ -164,9 +164,14 @@ class PlaybackController(
     private var skipSegments: List<SkipSegmentModel> = emptyList()
     private val autoSkippedTypes = mutableSetOf<String>()
     private var tickerJob: Job? = null
+    private var loggedPlaybackStartUrl: String? = null
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            if (isPlaying && currentStreamUrl != null && currentStreamUrl != loggedPlaybackStartUrl) {
+                loggedPlaybackStartUrl = currentStreamUrl
+                Logger.i(tag, "PLAYBACK STARTED (video is rendering) provider=${_state.value.activeProviderId}")
+            }
             _state.update {
                 it.copy(
                     isPlaying = isPlaying,
