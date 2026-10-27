@@ -31,6 +31,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -63,6 +64,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -596,19 +598,60 @@ fun GenreChipsRow(type: String, onPick: (String, String) -> Unit) {
     }
 }
 
-/** Big backdrop "hero" card at the top of Home for a featured title. */
+/** A swipeable carousel of featured titles at the top of Home. */
+@Composable
+fun HeroCarousel(items: List<MediaItemModel>, onPlay: (MediaItemModel) -> Unit) {
+    if (items.isEmpty()) return
+    val listState = rememberLazyListState()
+    val fling = androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior(lazyListState = listState)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyRow(
+            state = listState,
+            flingBehavior = fling,
+            contentPadding = PaddingValues(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(items) { item ->
+                FeaturedHero(
+                    item = item,
+                    onPlay = onPlay,
+                    modifier = Modifier.fillParentMaxWidth()
+                )
+            }
+        }
+        // Little page dots showing which featured title is in view
+        val current = listState.firstVisibleItemIndex
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 2.dp),
+            horizontalArrangement = Arrangement.Center
+        ) {
+            items.forEachIndexed { index, _ ->
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 3.dp)
+                        .size(if (index == current) 8.dp else 6.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(if (index == current) Color(0xFFE50914) else Color(0xFF555555))
+                )
+            }
+        }
+    }
+}
+
+/** Big backdrop "hero" card for a featured title. */
 @Composable
 fun FeaturedHero(
     item: MediaItemModel,
     onPlay: (MediaItemModel) -> Unit,
+    modifier: Modifier = Modifier,
     isFirstRow: Boolean = false,
     focusMemory: TvFocusMemory? = null
 ) {
     val heroImage = item.backdropUrl.ifBlank { item.posterUrl }
     Box(
-        modifier = Modifier
-            .padding(horizontal = 14.dp)
-            .fillMaxWidth()
+        modifier = modifier
             .height(200.dp)
             .then(
                 if (focusMemory != null) Modifier.tvRememberedFocus("hero#${item.id}", 0, isFirstRow, focusMemory)
@@ -1080,14 +1123,13 @@ fun HomeScreenWithSidebar(
                         ) {
                             when (selectedSection) {
                                 "Home" -> {
-                                    val heroItem = trendingAll.firstOrNull { it.backdropUrl.isNotBlank() }
-                                        ?: trendingAll.firstOrNull()
-                                    if (heroItem != null) {
+                                    val heroItems = trendingAll
+                                        .filter { it.backdropUrl.isNotBlank() }
+                                        .ifEmpty { trendingAll }
+                                        .take(5)
+                                    if (heroItems.isNotEmpty()) {
                                         item {
-                                            FeaturedHero(
-                                                item = heroItem,
-                                                onPlay = onMediaClick
-                                            )
+                                            HeroCarousel(items = heroItems, onPlay = onMediaClick)
                                         }
                                     }
                                     val homeFirst = when {
@@ -2250,44 +2292,61 @@ fun CastRow(
         Text(text = "Cast", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 2.dp)) {
             items(cast) { member ->
+                var focused by remember { mutableStateOf(false) }
+                val castScale by animateFloatAsState(if (focused) 1.14f else 1f, label = "castScale")
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .width(84.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .tvFocusHighlight(RoundedCornerShape(10.dp))
+                        .onFocusChanged { focused = it.isFocused }
                         .clickable { onCastClick(member) }
                         .padding(4.dp)
+                        .graphicsLayer { scaleX = castScale; scaleY = castScale }
                 ) {
-                    if (member.profileUrl.isNotBlank()) {
-                        AsyncImage(
-                            model = member.profileUrl,
-                            contentDescription = member.name,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .size(72.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(Color.DarkGray)
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(72.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(Color(0xFF2A2A2A)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = member.name.take(1).uppercase(),
-                                color = Color.White,
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Bold
+                    // Bright ring + red glow makes it obvious which cast member is selected
+                    Box(
+                        modifier = Modifier
+                            .size(76.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(if (focused) Color(0xFFE50914) else Color.Transparent)
+                            .border(
+                                if (focused) 3.dp else 0.dp,
+                                if (focused) Color.White else Color.Transparent,
+                                RoundedCornerShape(50)
                             )
+                            .padding(if (focused) 3.dp else 0.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (member.profileUrl.isNotBlank()) {
+                            AsyncImage(
+                                model = member.profileUrl,
+                                contentDescription = member.name,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(70.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(Color.DarkGray)
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(70.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(Color(0xFF2A2A2A)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = member.name.take(1).uppercase(),
+                                    color = Color.White,
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                     Text(
                         text = member.name,
-                        color = Color.White,
+                        color = if (focused) Color.White else Color.LightGray,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 2,
