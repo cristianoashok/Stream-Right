@@ -24,6 +24,8 @@ import com.victor.stream.domain.MediaItemModel
 import com.victor.stream.resolver.WebViewStreamResolver
 import com.victor.stream.ui.HomeScreenWithSidebar
 import com.victor.stream.ui.MediaDetailsScreen
+import com.victor.stream.ui.CompanyTitlesScreen
+import com.victor.stream.ui.PersonFilmographyScreen
 import com.victor.stream.ui.PlayerScreen
 import com.victor.stream.ui.SearchScreen
 import com.victor.stream.ui.SettingsScreen
@@ -215,7 +217,51 @@ fun AppNavHost() {
                     navController.navigate("player/$sessionId") {
                         launchSingleTop = true
                     }
+                },
+                onOpenPerson = { personId, personName ->
+                    navController.navigate("person/$personId/${android.net.Uri.encode(personName)}") {
+                        launchSingleTop = true
+                    }
+                },
+                onOpenCompany = { companyId, companyName ->
+                    navController.navigate("company/$companyId/${android.net.Uri.encode(companyName)}") {
+                        launchSingleTop = true
+                    }
                 }
+            )
+        }
+
+        composable(
+            route = "person/{personId}/{personName}",
+            arguments = listOf(
+                navArgument("personId") { type = NavType.IntType },
+                navArgument("personName") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val personId = backStackEntry.arguments?.getInt("personId") ?: 0
+            val personName = backStackEntry.arguments?.getString("personName").orEmpty()
+            PersonFilmographyScreen(
+                personId = personId,
+                personName = personName,
+                onBack = { navController.navigateBackSafely() },
+                onMediaClick = { item -> openDetailsForMedia(item) }
+            )
+        }
+
+        composable(
+            route = "company/{companyId}/{companyName}",
+            arguments = listOf(
+                navArgument("companyId") { type = NavType.IntType },
+                navArgument("companyName") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val companyId = backStackEntry.arguments?.getInt("companyId") ?: 0
+            val companyName = backStackEntry.arguments?.getString("companyName").orEmpty()
+            CompanyTitlesScreen(
+                companyId = companyId,
+                companyName = companyName,
+                onBack = { navController.navigateBackSafely() },
+                onMediaClick = { item -> openDetailsForMedia(item) }
             )
         }
 

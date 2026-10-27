@@ -68,6 +68,7 @@ data class MediaItemModel(
     val malId: Int? = null,
     val totalEpisodes: Int = 24,
     val animeFormat: String = "TV",
+    val backdropUrl: String = "",
     val seasons: List<SeasonInfo> = emptyList()
 ) {
     val isSeries: Boolean
@@ -97,6 +98,19 @@ data class SubtitleTrack(
     val label: String,
     val language: String = "en",
     val format: String = "srt"
+)
+
+data class CastMember(
+    val id: Int,
+    val name: String,
+    val character: String,
+    val profileUrl: String
+)
+
+data class ProductionCompanyRef(
+    val id: Int,
+    val name: String,
+    val logoUrl: String
 )
 
 data class SkipSegmentModel(

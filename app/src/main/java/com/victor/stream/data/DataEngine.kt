@@ -9,7 +9,9 @@ import com.google.gson.reflect.TypeToken
 import com.victor.stream.BuildConfig
 import com.victor.stream.core.Logger
 import com.victor.stream.domain.BridgedIds
+import com.victor.stream.domain.CastMember
 import com.victor.stream.domain.EpisodeRef
+import com.victor.stream.domain.ProductionCompanyRef
 import com.victor.stream.domain.MediaItemModel
 import com.victor.stream.domain.MediaKind
 import com.victor.stream.domain.PlaybackSession
@@ -58,8 +60,27 @@ data class TmdbMediaDto(
     @SerializedName("first_air_date") val firstAirDate: String? = null,
     @SerializedName("genre_ids") val genreIds: List<Int>? = emptyList(),
     @SerializedName("original_language") val originalLanguage: String? = null,
+    @SerializedName("backdrop_path") val backdropPath: String? = null,
+    @SerializedName("production_companies") val productionCompanies: List<TmdbCompanyDto>? = null,
     val seasons: List<TmdbSeasonDto>? = null
 )
+
+data class TmdbCompanyDto(
+    val id: Int,
+    val name: String? = null,
+    @SerializedName("logo_path") val logoPath: String? = null
+)
+
+data class TmdbCreditsResponse(val cast: List<TmdbCastDto> = emptyList())
+
+data class TmdbCastDto(
+    val id: Int,
+    val name: String? = null,
+    val character: String? = null,
+    @SerializedName("profile_path") val profilePath: String? = null
+)
+
+data class TmdbPersonCreditsResponse(val cast: List<TmdbMediaDto> = emptyList())
 
 data class TmdbSeasonDto(
     @SerializedName("season_number") val seasonNumber: Int,
@@ -139,6 +160,18 @@ interface TmdbRetrofitApi {
     @GET("tv/{tv_id}")
     suspend fun getTvDetails(@Path("tv_id") tvId: Int, @Query("api_key") apiKey: String): TmdbMediaDto
 
+    @GET("movie/{movie_id}")
+    suspend fun getMovieDetails(@Path("movie_id") movieId: Int, @Query("api_key") apiKey: String): TmdbMediaDto
+
+    @GET("movie/{movie_id}/credits")
+    suspend fun getMovieCredits(@Path("movie_id") movieId: Int, @Query("api_key") apiKey: String): TmdbCreditsResponse
+
+    @GET("tv/{tv_id}/credits")
+    suspend fun getTvCredits(@Path("tv_id") tvId: Int, @Query("api_key") apiKey: String): TmdbCreditsResponse
+
+    @GET("person/{person_id}/combined_credits")
+    suspend fun getPersonCredits(@Path("person_id") personId: Int, @Query("api_key") apiKey: String): TmdbPersonCreditsResponse
+
     @GET("tv/{tv_id}/season/{season_number}")
     suspend fun getSeasonEpisodes(
         @Path("tv_id") tvId: Int,
@@ -155,7 +188,8 @@ interface TmdbRetrofitApi {
         @Query("with_genres") withGenres: String? = null,
         @Query("primary_release_year") primaryReleaseYear: Int? = null,
         @Query("with_original_language") withOriginalLanguage: String? = null,
-        @Query("sort_by") sortBy: String? = null
+        @Query("sort_by") sortBy: String? = null,
+        @Query("with_companies") withCompanies: String? = null
     ): TmdbListResponse
 
     @GET("discover/tv")
@@ -164,7 +198,8 @@ interface TmdbRetrofitApi {
         @Query("with_genres") withGenres: String? = null,
         @Query("first_air_date_year") firstAirDateYear: Int? = null,
         @Query("with_original_language") withOriginalLanguage: String? = null,
-        @Query("sort_by") sortBy: String? = null
+        @Query("sort_by") sortBy: String? = null,
+        @Query("with_companies") withCompanies: String? = null
     ): TmdbListResponse
 
     @GET("authentication/token/new")
@@ -569,6 +604,11 @@ class CatalogRepository(
         } else {
             "https://image.tmdb.org/t/p/w500${dto.posterPath.orEmpty()}"
         }
+        val fullBackdrop = when {
+            dto.backdropPath?.startsWith("http") == true -> dto.backdropPath
+            !dto.backdropPath.isNullOrBlank() -> "https://image.tmdb.org/t/p/w780${dto.backdropPath}"
+            else -> ""
+        }
 
         val mappedSeasons = dto.seasons?.map { s ->
             val sPoster = if (s.posterPath?.startsWith("http") == true) {
@@ -603,6 +643,7 @@ class CatalogRepository(
                 malId = staticBridge?.malId,
                 totalEpisodes = staticBridge?.totalEpisodes ?: 24,
                 animeFormat = if (isSeries) "TV" else "MOVIE",
+                backdropUrl = fullBackdrop,
                 seasons = mappedSeasons
             )
             mediaMemoryCache[model.id] = model
@@ -619,6 +660,7 @@ class CatalogRepository(
                 genreIds = dto.genreIds ?: emptyList(),
                 originalLanguage = dto.originalLanguage ?: "en",
                 tmdbId = cleanTmdbId,
+                backdropUrl = fullBackdrop,
                 seasons = mappedSeasons
             )
             mediaMemoryCache[model.id] = model
@@ -1217,6 +1259,105 @@ class CatalogRepository(
         }
 
         segments
+    }
+
+    // ==========================================
+    // CAST & PRODUCTION (TMDB credits / company)
+    // ==========================================
+
+    private fun tmdbCleanId(media: MediaItemModel): Int =
+        media.tmdbId ?: (if (media.id >= 100_000_000) media.id - 100_000_000 else media.id)
+
+    /** Top-billed cast with headshots for a movie or series. */
+    suspend fun fetchCast(media: MediaItemModel): List<CastMember> = withContext(Dispatchers.IO) {
+        val apiKey = BuildConfig.TMDB_API_KEY
+        val id = tmdbCleanId(media)
+        if (apiKey.isBlank() || id <= 0) return@withContext emptyList()
+        try {
+            val credits = if (media.isSeries) {
+                NetworkApis.tmdb.getTvCredits(id, apiKey)
+            } else {
+                NetworkApis.tmdb.getMovieCredits(id, apiKey)
+            }
+            credits.cast.take(20).mapNotNull { c ->
+                val name = c.name?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val photo = when {
+                    c.profilePath?.startsWith("http") == true -> c.profilePath
+                    !c.profilePath.isNullOrBlank() -> "https://image.tmdb.org/t/p/w185${c.profilePath}"
+                    else -> ""
+                }
+                CastMember(id = c.id, name = name, character = c.character.orEmpty(), profileUrl = photo)
+            }
+        } catch (e: Exception) {
+            Logger.w("CatalogRepo", "Failed to fetch cast for ${media.title}", e)
+            emptyList()
+        }
+    }
+
+    /** Production/studio companies for a movie or series. */
+    suspend fun fetchProductionCompanies(media: MediaItemModel): List<ProductionCompanyRef> = withContext(Dispatchers.IO) {
+        val apiKey = BuildConfig.TMDB_API_KEY
+        val id = tmdbCleanId(media)
+        if (apiKey.isBlank() || id <= 0) return@withContext emptyList()
+        try {
+            val detail = if (media.isSeries) {
+                NetworkApis.tmdb.getTvDetails(id, apiKey)
+            } else {
+                NetworkApis.tmdb.getMovieDetails(id, apiKey)
+            }
+            (detail.productionCompanies ?: emptyList()).mapNotNull { co ->
+                val name = co.name?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val logo = when {
+                    co.logoPath?.startsWith("http") == true -> co.logoPath
+                    !co.logoPath.isNullOrBlank() -> "https://image.tmdb.org/t/p/w185${co.logoPath}"
+                    else -> ""
+                }
+                ProductionCompanyRef(id = co.id, name = name, logoUrl = logo)
+            }
+        } catch (e: Exception) {
+            Logger.w("CatalogRepo", "Failed to fetch companies for ${media.title}", e)
+            emptyList()
+        }
+    }
+
+    /** Everything a given actor/person has appeared in (released only), newest first. */
+    suspend fun fetchPersonFilmography(personId: Int): List<MediaItemModel> = withContext(Dispatchers.IO) {
+        val apiKey = BuildConfig.TMDB_API_KEY
+        if (apiKey.isBlank() || personId <= 0) return@withContext emptyList()
+        try {
+            NetworkApis.tmdb.getPersonCredits(personId, apiKey).cast
+                .filter { !it.posterPath.isNullOrBlank() && it.isReleased() }
+                .sortedByDescending { (it.releaseDate ?: it.firstAirDate).orEmpty() }
+                .map { mapTmdbDtoToDomain(it) }
+                .distinctBy { it.id }
+        } catch (e: Exception) {
+            Logger.w("CatalogRepo", "Failed to fetch filmography for person=$personId", e)
+            emptyList()
+        }
+    }
+
+    /** Movies and shows from a given production company (released only), most popular first. */
+    suspend fun fetchCompanyTitles(companyId: Int): List<MediaItemModel> = withContext(Dispatchers.IO) {
+        val apiKey = BuildConfig.TMDB_API_KEY
+        if (apiKey.isBlank() || companyId <= 0) return@withContext emptyList()
+        try {
+            val movDef = async {
+                runCatching {
+                    NetworkApis.tmdb.discoverMovies(apiKey, sortBy = "popularity.desc", withCompanies = companyId.toString()).results
+                }.getOrDefault(emptyList())
+            }
+            val tvDef = async {
+                runCatching {
+                    NetworkApis.tmdb.discoverTv(apiKey, sortBy = "popularity.desc", withCompanies = companyId.toString()).results
+                }.getOrDefault(emptyList())
+            }
+            val movs = movDef.await().filter { !it.posterPath.isNullOrBlank() && it.isReleased() }.map { mapTmdbDtoToDomain(it, "movie") }
+            val tvs = tvDef.await().filter { !it.posterPath.isNullOrBlank() && it.isReleased() }.map { mapTmdbDtoToDomain(it, "tv") }
+            (movs + tvs).distinctBy { it.id }
+        } catch (e: Exception) {
+            Logger.w("CatalogRepo", "Failed to fetch titles for company=$companyId", e)
+            emptyList()
+        }
     }
 }
 

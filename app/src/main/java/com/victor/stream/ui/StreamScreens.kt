@@ -1254,10 +1254,19 @@ fun AnimeCatalogSection(
 fun MediaDetailsScreen(
     initialMedia: MediaItemModel,
     onBack: () -> Unit,
-    onNavigateToSession: (String) -> Unit
+    onNavigateToSession: (String) -> Unit,
+    onOpenPerson: (Int, String) -> Unit = { _, _ -> },
+    onOpenCompany: (Int, String) -> Unit = { _, _ -> }
 ) {
     val scope = rememberCoroutineScope()
     var media by remember(initialMedia.id) { mutableStateOf(initialMedia) }
+    var castList by remember(initialMedia.id) { mutableStateOf<List<com.victor.stream.domain.CastMember>>(emptyList()) }
+    var companyList by remember(initialMedia.id) { mutableStateOf<List<com.victor.stream.domain.ProductionCompanyRef>>(emptyList()) }
+
+    LaunchedEffect(initialMedia.id) {
+        castList = ServiceLocator.catalogRepository.fetchCast(initialMedia)
+        companyList = ServiceLocator.catalogRepository.fetchProductionCompanies(initialMedia)
+    }
     var inWatchLater by remember(media.id) {
         mutableStateOf(ServiceLocator.prefsStore.getWatchLater().any { it.id == media.id })
     }
@@ -1511,6 +1520,34 @@ fun MediaDetailsScreen(
                 }
             }
 
+            if (media.backdropUrl.isNotBlank()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(170.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                ) {
+                    AsyncImage(
+                        model = media.backdropUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.DarkGray)
+                    )
+                    // Fade the bottom into the page background so it blends in
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                androidx.compose.ui.graphics.Brush.verticalGradient(
+                                    colors = listOf(Color.Transparent, Color(0xFF121212))
+                                )
+                            )
+                    )
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(14.dp)
@@ -1636,6 +1673,15 @@ fun MediaDetailsScreen(
                         }
                     }
                 }
+            }
+
+            if (castList.isNotEmpty()) {
+                HorizontalDivider(color = Color.DarkGray)
+                CastRow(cast = castList, onCastClick = { c -> onOpenPerson(c.id, c.name) })
+            }
+
+            if (companyList.isNotEmpty()) {
+                ProductionRow(companies = companyList, onCompanyClick = { co -> onOpenCompany(co.id, co.name) })
             }
 
             if (media.isSeries) {
@@ -1930,6 +1976,237 @@ fun MediaDetailsScreen(
             )
         }
     }
+}
+
+// ==========================================
+// 3b. CAST & PRODUCTION (rows + filmography/company screens)
+// ==========================================
+
+@Composable
+fun CastRow(
+    cast: List<com.victor.stream.domain.CastMember>,
+    onCastClick: (com.victor.stream.domain.CastMember) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(text = "Cast", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 2.dp)) {
+            items(cast) { member ->
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .width(84.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .tvFocusHighlight(RoundedCornerShape(10.dp))
+                        .clickable { onCastClick(member) }
+                        .padding(4.dp)
+                ) {
+                    if (member.profileUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = member.profileUrl,
+                            contentDescription = member.name,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(Color.DarkGray)
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(Color(0xFF2A2A2A)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = member.name.take(1).uppercase(),
+                                color = Color.White,
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    Text(
+                        text = member.name,
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.padding(top = 5.dp)
+                    )
+                    if (member.character.isNotBlank()) {
+                        Text(
+                            text = member.character,
+                            color = Color.Gray,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ProductionRow(
+    companies: List<com.victor.stream.domain.ProductionCompanyRef>,
+    onCompanyClick: (com.victor.stream.domain.ProductionCompanyRef) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(text = "Production", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 2.dp)) {
+            items(companies) { co ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .tvFocusHighlight(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF1E1E1E))
+                        .clickable { onCompanyClick(co) }
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    if (co.logoUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = co.logoUrl,
+                            contentDescription = co.name,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .height(22.dp)
+                                .widthIn(max = 60.dp)
+                                .background(Color.White, RoundedCornerShape(4.dp))
+                                .padding(2.dp)
+                        )
+                    }
+                    Text(
+                        text = co.name,
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Shared grid screen used by both the actor-filmography and company-titles pages. */
+@Composable
+private fun TitleGridScreen(
+    title: String,
+    subtitle: String,
+    isLoading: Boolean,
+    titles: List<MediaItemModel>,
+    onBack: () -> Unit,
+    onMediaClick: (MediaItemModel) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF121212))
+            .statusBarsPadding()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(
+                onClick = onBack,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                modifier = Modifier
+                    .tvFocusHighlight(RoundedCornerShape(50))
+                    .height(36.dp)
+            ) {
+                Text("← Back", color = Color.White, fontSize = 13.sp)
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (subtitle.isNotBlank()) {
+                    Text(text = subtitle, color = Color.Gray, fontSize = 12.sp)
+                }
+            }
+        }
+        HorizontalDivider(color = Color(0xFF2C2C2C))
+
+        when {
+            isLoading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Color(0xFFE50914))
+            }
+            titles.isEmpty() -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Nothing to show here yet.", color = Color.Gray, fontSize = 14.sp)
+            }
+            else -> LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 110.dp),
+                contentPadding = PaddingValues(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(titles) { item ->
+                    PosterCard(
+                        item = item,
+                        isWatchLaterScreen = false,
+                        onClick = { onMediaClick(item) },
+                        onWatchLaterChanged = {}
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PersonFilmographyScreen(
+    personId: Int,
+    personName: String,
+    onBack: () -> Unit,
+    onMediaClick: (MediaItemModel) -> Unit
+) {
+    var items by remember(personId) { mutableStateOf<List<MediaItemModel>>(emptyList()) }
+    var isLoading by remember(personId) { mutableStateOf(true) }
+    LaunchedEffect(personId) {
+        isLoading = true
+        items = ServiceLocator.catalogRepository.fetchPersonFilmography(personId)
+        isLoading = false
+    }
+    TitleGridScreen(
+        title = personName,
+        subtitle = if (!isLoading) "${items.size} titles" else "Loading…",
+        isLoading = isLoading,
+        titles = items,
+        onBack = onBack,
+        onMediaClick = onMediaClick
+    )
+}
+
+@Composable
+fun CompanyTitlesScreen(
+    companyId: Int,
+    companyName: String,
+    onBack: () -> Unit,
+    onMediaClick: (MediaItemModel) -> Unit
+) {
+    var items by remember(companyId) { mutableStateOf<List<MediaItemModel>>(emptyList()) }
+    var isLoading by remember(companyId) { mutableStateOf(true) }
+    LaunchedEffect(companyId) {
+        isLoading = true
+        items = ServiceLocator.catalogRepository.fetchCompanyTitles(companyId)
+        isLoading = false
+    }
+    TitleGridScreen(
+        title = companyName,
+        subtitle = if (!isLoading) "${items.size} titles" else "Loading…",
+        isLoading = isLoading,
+        titles = items,
+        onBack = onBack,
+        onMediaClick = onMediaClick
+    )
 }
 
 // ==========================================
