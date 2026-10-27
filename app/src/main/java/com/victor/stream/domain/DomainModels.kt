@@ -102,7 +102,10 @@ data class SubtitleTrack(
 data class SkipSegmentModel(
     val startMs: Long,
     val endMs: Long,
-    val label: String
+    val label: String,
+    // true when we had no real intro/credits data and estimated the window.
+    // Guessed segments offer a manual "Skip" button but are never auto-skipped.
+    val isGuessed: Boolean = false
 )
 
 data class ServerCandidate(

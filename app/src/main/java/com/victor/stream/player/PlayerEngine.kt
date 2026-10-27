@@ -166,6 +166,52 @@ class PlaybackController(
     private var tickerJob: Job? = null
     private var loggedPlaybackStartUrl: String? = null
 
+    // ---- Subtitle selection ----
+    // Until the viewer opens the Captions menu and picks something, subtitles default
+    // to English (never a random foreign track). Once they pick, we remember THAT track
+    // by URL so reordering the list later can't silently switch the language on them.
+    private var userPickedSubtitle = false
+    private var preferredSubtitleUrl: String? = null
+    private var preferredSubtitleLanguage: String? = null
+    private var embeddedSubtitleSelected = false // viewer chose the stream's built-in captions
+
+    /** English (or clearly English-labelled) tracks first, then the rest alphabetically. */
+    private fun sortSubsEnglishFirst(list: List<SubtitleTrack>): List<SubtitleTrack> =
+        list.sortedWith(
+            compareByDescending<SubtitleTrack> { isEnglish(it) }.thenBy { it.label.lowercase() }
+        )
+
+    private fun isEnglish(track: SubtitleTrack): Boolean {
+        val lang = track.language.lowercase()
+        return lang == "en" || lang == "eng" || lang.startsWith("en-") ||
+                track.label.contains("english", ignoreCase = true)
+    }
+
+    /**
+     * Decides which subtitle index should be active for [list].
+     * Returns (index, track) — index -1 means "Off" (shown instead of a wrong language).
+     */
+    private fun resolveSubtitleSelection(list: List<SubtitleTrack>): Pair<Int, SubtitleTrack?> {
+        if (userPickedSubtitle && embeddedSubtitleSelected) return -2 to null // built-in captions
+        if (list.isEmpty()) return -1 to null
+        if (userPickedSubtitle) {
+            if (preferredSubtitleUrl == null && preferredSubtitleLanguage == null) {
+                return -1 to null // user chose Off
+            }
+            // Same stream: match the exact track. Different episode (URL changed):
+            // fall back to the same language so their choice carries over.
+            val byUrl = preferredSubtitleUrl?.let { url -> list.indexOfFirst { it.url == url } } ?: -1
+            if (byUrl >= 0) return byUrl to list[byUrl]
+            val byLang = preferredSubtitleLanguage?.let { lang ->
+                list.indexOfFirst { it.language.equals(lang, ignoreCase = true) }
+            } ?: -1
+            return if (byLang >= 0) byLang to list[byLang] else -1 to null
+        }
+        // Auto: English if we have it, otherwise Off (don't guess a foreign language)
+        val enIdx = list.indexOfFirst { isEnglish(it) }
+        return if (enIdx >= 0) enIdx to list[enIdx] else -1 to null
+    }
+
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (isPlaying && currentStreamUrl != null && currentStreamUrl != loggedPlaybackStartUrl) {
@@ -266,11 +312,10 @@ class PlaybackController(
         startAtMs: Long,
         episodeTitle: String? = null
     ) {
-        val mergedSubs = (stream.subtitles + _state.value.availableSubtitles).distinctBy { it.url }
-        val selectedIdx = _state.value.selectedSubtitleIndex.let { idx ->
-            if (idx >= 0 && mergedSubs.isNotEmpty()) idx.coerceIn(0, mergedSubs.lastIndex) else idx
-        }
-        val activeSub = if (selectedIdx >= 0) mergedSubs.getOrNull(selectedIdx) else null
+        val mergedSubs = sortSubsEnglishFirst(
+            (stream.subtitles + _state.value.availableSubtitles).distinctBy { it.url }
+        )
+        val (selectedIdx, activeSub) = resolveSubtitleSelection(mergedSubs)
 
         // If the exact same stream URL + subtitle track is already loaded, do not re-prepare!
         if (currentStreamUrl == stream.streamUrl &&
@@ -337,7 +382,10 @@ class PlaybackController(
                     .setMimeType(subMime)
                     .setLanguage(activeSub.language)
                     .setLabel(activeSub.label)
-                    .setSelectionFlags(C.SELECTION_FLAG_DEFAULT or C.SELECTION_FLAG_FORCED)
+                    // DEFAULT only. FORCED told ExoPlayer this was a "forced narrative" track
+                    // (foreign-dialogue only), which interacted badly with embedded captions
+                    // and could show the wrong language.
+                    .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
                     .build()
             )
         } else {
@@ -366,14 +414,52 @@ class PlaybackController(
     }
 
     fun updateSubtitlesList(newSubtitles: List<SubtitleTrack>) {
-        val merged = (newSubtitles + _state.value.availableSubtitles).distinctBy { it.url }
-        if (merged.size == _state.value.availableSubtitles.size) return
-        val wasEmpty = _state.value.availableSubtitles.isEmpty()
-        _state.update { it.copy(availableSubtitles = merged) }
+        val merged = sortSubsEnglishFirst(
+            (newSubtitles + _state.value.availableSubtitles).distinctBy { it.url }
+        )
+        if (merged.size == _state.value.availableSubtitles.size &&
+            merged.map { it.url } == _state.value.availableSubtitles.map { it.url }
+        ) return
 
-        if (wasEmpty && _state.value.selectedSubtitleIndex == 0 && merged.isNotEmpty() && currentSubtitleUrl == null) {
-            selectSubtitleIndex(0)
+        val (idx, activeSub) = resolveSubtitleSelection(merged)
+        _state.update { it.copy(availableSubtitles = merged, selectedSubtitleIndex = idx) }
+
+        // If the track that SHOULD be showing (e.g. the English one that just loaded from
+        // the subtitle API, after we first started on a non-English resolver track) isn't the
+        // one currently loaded, switch to it now.
+        if (activeSub != null && activeSub.url != currentSubtitleUrl) {
+            loadSubtitleIntoPlayer(activeSub)
+        } else {
+            applyTrackSelectionParameters()
         }
+    }
+
+    /** Reloads the current video with [sub] as its external subtitle, preserving position. */
+    private fun loadSubtitleIntoPlayer(sub: SubtitleTrack) {
+        val streamUrl = currentStreamUrl ?: return
+        val savedPos = exoPlayer.currentPosition.coerceAtLeast(0L)
+        currentSubtitleUrl = sub.url
+        val subMime = if (sub.format.equals("vtt", true) || sub.url.contains(".vtt", true)) {
+            MimeTypes.TEXT_VTT
+        } else {
+            MimeTypes.APPLICATION_SUBRIP
+        }
+        val subConfig = MediaItem.SubtitleConfiguration.Builder(sub.url.toUri())
+            .setMimeType(subMime)
+            .setLanguage(sub.language)
+            .setLabel(sub.label)
+            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+            .build()
+        val currentUri = exoPlayer.currentMediaItem?.localConfiguration?.uri ?: streamUrl.toUri()
+        val currentMime = exoPlayer.currentMediaItem?.localConfiguration?.mimeType
+        val builder = MediaItem.Builder()
+            .setUri(currentUri)
+            .setSubtitleConfigurations(listOf(subConfig))
+        if (currentMime != null) builder.setMimeType(currentMime)
+        exoPlayer.setMediaItem(builder.build(), savedPos)
+        exoPlayer.prepare()
+        exoPlayer.playWhenReady = true
+        applyTrackSelectionParameters()
     }
 
     fun setSkipSegments(segments: List<SkipSegmentModel>) {
@@ -390,47 +476,22 @@ class PlaybackController(
         exoPlayer.seekTo(positionMs.coerceAtLeast(0L))
     }
 
+    /** Called when the viewer taps a caption option in the menu. */
     fun selectSubtitleIndex(index: Int) {
-        val prevIdx = _state.value.selectedSubtitleIndex
+        userPickedSubtitle = true
+        embeddedSubtitleSelected = index == -2
+        val targetSub = if (index >= 0) _state.value.availableSubtitles.getOrNull(index) else null
+        preferredSubtitleUrl = targetSub?.url
+        preferredSubtitleLanguage = targetSub?.language
+
         _state.update { it.copy(selectedSubtitleIndex = index) }
         applyTrackSelectionParameters()
 
-        val targetSub = if (index >= 0) _state.value.availableSubtitles.getOrNull(index) else null
         if (targetSub != null && targetSub.url != currentSubtitleUrl && currentStreamUrl != null && currentMedia != null) {
-            val savedPos = exoPlayer.currentPosition.coerceAtLeast(0L)
-            val stream = ResolvedStream(
-                streamUrl = currentStreamUrl!!,
-                mimeType = StreamMimeType.HLS,
-                headers = emptyMap(),
-                subtitles = _state.value.availableSubtitles,
-                providerId = _state.value.activeProviderId,
-                serverLabel = _state.value.activeServerLabel,
-                episode = null
-            )
-            currentSubtitleUrl = targetSub.url
-            val subMime = if (targetSub.format.equals("vtt", true) || targetSub.url.contains(".vtt", true)) {
-                MimeTypes.TEXT_VTT
-            } else {
-                MimeTypes.APPLICATION_SUBRIP
-            }
-            val subConfig = MediaItem.SubtitleConfiguration.Builder(targetSub.url.toUri())
-                .setMimeType(subMime)
-                .setLanguage(targetSub.language)
-                .setLabel(targetSub.label)
-                .setSelectionFlags(C.SELECTION_FLAG_DEFAULT or C.SELECTION_FLAG_FORCED)
-                .build()
-
-            val currentUri = exoPlayer.currentMediaItem?.localConfiguration?.uri ?: stream.streamUrl.toUri()
-            val currentMime = exoPlayer.currentMediaItem?.localConfiguration?.mimeType
-            val builder = MediaItem.Builder()
-                .setUri(currentUri)
-                .setSubtitleConfigurations(listOf(subConfig))
-            if (currentMime != null) builder.setMimeType(currentMime)
-
-            exoPlayer.setMediaItem(builder.build(), savedPos)
-            exoPlayer.prepare()
-            exoPlayer.playWhenReady = true
-        } else if (prevIdx != index) {
+            loadSubtitleIntoPlayer(targetSub)
+        } else if (index < 0) {
+            // Off (or embedded): nothing external to load, just disable external text
+            currentSubtitleUrl = null
             applyTrackSelectionParameters()
         }
     }
@@ -478,7 +539,10 @@ class PlaybackController(
             .setMaxVideoSize(s.selectedQuality.maxWidth, s.selectedQuality.maxHeight)
             .setForceHighestSupportedBitrate(s.selectedQuality.forceHighest)
             .setPreferredTextLanguage(activeSub?.language ?: "en")
-            .setSelectUndeterminedTextLanguage(true)
+            // false: don't let a stream's unlabelled ("undetermined") embedded caption track
+            // get picked over the external subtitle the viewer actually chose — that was a
+            // cause of the wrong language appearing while English was selected.
+            .setSelectUndeterminedTextLanguage(false)
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, subsDisabled)
 
         if (currentMedia?.isAnime == true && s.selectedAudioMode != "English Boost") {

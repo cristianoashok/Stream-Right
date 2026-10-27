@@ -28,7 +28,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -88,14 +87,18 @@ private fun formatPlayerTime(ms: Long): String {
     return if (h > 0) String.format("%d:%02d:%02d", h, m, sec) else String.format("%d:%02d", m, sec)
 }
 
-/** White rounded ring used to show which player button the remote is on. */
+/**
+ * Soft, shadow-like highlight used to show which player button the remote is on.
+ * Deliberately NOT a hard white box (that read like a rendering bug) — just a
+ * faint rounded glow behind the icon.
+ */
 private fun playerFocusRing(context: Context): GradientDrawable {
     val density = context.resources.displayMetrics.density
     return GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
-        cornerRadius = 12f * density
-        setColor(0x40FFFFFF)
-        setStroke((3f * density).toInt(), AndroidColor.WHITE)
+        // Large radius so round icon buttons get a round (pill) highlight, not a square
+        cornerRadius = 100f * density
+        setColor(0x26FFFFFF) // ~15% white: a gentle shadow, no border
     }
 }
 
@@ -419,10 +422,12 @@ fun PlayerScreen(
         playbackController.setSkipSegments(segs)
     }
 
-    // Handle auto-skip when entering Intro / Credits segment
+    // Handle auto-skip when entering Intro / Credits segment.
+    // Only acts on REAL data (from the skip databases). Estimated/guessed windows get a
+    // manual Skip button instead, so we never jump the viewer somewhere on a bad guess.
     LaunchedEffect(playerState.activeSkipSegment, autoSkipEnabled) {
         val seg = playerState.activeSkipSegment ?: return@LaunchedEffect
-        if (autoSkipEnabled && !playbackController.hasAlreadyAutoSkipped(seg.label)) {
+        if (autoSkipEnabled && !seg.isGuessed && !playbackController.hasAlreadyAutoSkipped(seg.label)) {
             playbackController.markAutoSkipped(seg.label)
             if (seg.label == "Intro") {
                 playbackController.seekTo(seg.endMs)
@@ -570,8 +575,11 @@ fun PlayerScreen(
             return@handler false
         }
 
-        // ---- Control bar visible: arrows move between buttons, Back hides the bar ----
-        val barVisible = playerView?.isControllerFullyVisible ?: controllerVisible
+        // ---- Control bar visible: Back just hides it (feels like "nothing happened"),
+        //      a second Back with the bar already hidden exits the player as normal. ----
+        // Treat the bar as visible if EITHER signal says so, so the very first Back right
+        // after entering (while the controls are still fading in) hides instead of exiting.
+        val barVisible = controllerVisible || (playerView?.isControllerFullyVisible == true)
         if (barVisible) {
             if (isBack) {
                 if (ev.action == KeyEvent.ACTION_UP) playerView?.hideController()
@@ -645,22 +653,23 @@ fun PlayerScreen(
         }
     }
 
-    // Gives every focusable button in ExoPlayer's control bar a clear white ring + zoom
+    // Gives each focusable button in ExoPlayer's control bar a soft glow + gentle zoom
     // while the remote is on it, so you can always see which button you're on.
     fun applyRemoteFocusRings(root: View) {
         if (root is ViewGroup) {
             for (i in 0 until root.childCount) applyRemoteFocusRings(root.getChildAt(i))
         }
-        if (root === playerViewHolder[0] || !root.isFocusable || styledViews.containsKey(root)) return
+        // Leave the seek/progress bar with its native look — a highlight box around it
+        // looked like a glitch. Only the round icon buttons get the glow.
+        if (root === playerViewHolder[0] || !root.isFocusable ||
+            root is androidx.media3.ui.TimeBar || styledViews.containsKey(root)
+        ) return
         styledViews[root] = root.background
-        val isTimeBar = root is androidx.media3.ui.TimeBar
         val previousListener = root.onFocusChangeListener
         root.setOnFocusChangeListener { v, hasFocus ->
             if (hasFocus) {
                 v.background = playerFocusRing(v.context)
-                if (!isTimeBar) {
-                    v.animate().scaleX(1.18f).scaleY(1.18f).setDuration(120).start()
-                }
+                v.animate().scaleX(1.12f).scaleY(1.12f).setDuration(120).start()
             } else {
                 v.background = styledViews[v]
                 v.animate().scaleX(1f).scaleY(1f).setDuration(120).start()

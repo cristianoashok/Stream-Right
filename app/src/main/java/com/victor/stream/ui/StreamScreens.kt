@@ -696,8 +696,13 @@ fun HomeScreenWithSidebar(
                         .align(Alignment.CenterStart)
                         .tvFocusHighlight(RoundedCornerShape(50), focusedScale = 1.12f)
                         .onFocusChanged { state ->
-                            // TV: landing on ☰ with the remote opens the sidebar straight away
+                            // TV: landing on ☰ with the remote opens the sidebar straight away.
+                            // BUT only when focus has actually settled here on purpose — if a
+                            // poster is still waiting to grab focus (pendingKey set), e.g. right
+                            // after pressing Back from a movie, the ☰ gets focus for a split
+                            // second first; don't auto-open then.
                             if (isTv && state.isFocused &&
+                                focusMemory.pendingKey == null &&
                                 System.currentTimeMillis() > suppressAutoOpenUntil
                             ) {
                                 openDrawerFromRemote()

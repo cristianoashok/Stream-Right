@@ -1200,7 +1200,8 @@ class CatalogRepository(
 
         if (totalDurationMs > 300_000L && segments.none { it.label == "Credits" }) {
             val creditsStart = (totalDurationMs - 45_000L).coerceAtLeast(totalDurationMs * 85 / 100)
-            segments.add(SkipSegmentModel(creditsStart, totalDurationMs - 2000L, "Credits"))
+            // Estimated (no real data): show a Skip button, but don't auto-jump on it.
+            segments.add(SkipSegmentModel(creditsStart, totalDurationMs - 2000L, "Credits", isGuessed = true))
         }
 
         segments

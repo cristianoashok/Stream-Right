@@ -49,7 +49,7 @@ fun rememberIsTv(): Boolean {
 fun Modifier.tvFocusHighlight(
     shape: Shape = RoundedCornerShape(8.dp),
     focusedScale: Float = 1.06f,
-    borderWidth: Dp = 3.dp
+    borderWidth: Dp = 2.dp
 ): Modifier = composed {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
