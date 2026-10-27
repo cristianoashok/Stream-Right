@@ -28,6 +28,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Animation
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Movie
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Tv
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -424,15 +432,29 @@ fun Modifier.tvRememberedFocus(
             (memory.pendingKey == TvFocusMemory.FIRST_ITEM && isFirstRow && index == 0)
     LaunchedEffect(wantsFocus) {
         if (wantsFocus) {
-            delay(80)
-            if (runCatching { requester.requestFocus() }.isSuccess) {
-                memory.pendingKey = null
+            // On return from a movie the row may not be laid out on the first frame, so keep
+            // trying for a short while until this poster actually takes focus — otherwise
+            // focus is left sitting on the top menu bar.
+            var attempts = 0
+            while (attempts < 25 && memory.pendingKey != null) {
+                delay(60)
+                if (runCatching { requester.requestFocus() }.isSuccess) {
+                    memory.pendingKey = null
+                    break
+                }
+                attempts++
             }
         }
     }
     this
         .focusRequester(requester)
-        .onFocusChanged { if (it.hasFocus) memory.lastFocusedKey = key }
+        .onFocusChanged {
+            if (it.hasFocus) {
+                memory.lastFocusedKey = key
+                // This poster got focus (the one we wanted) — stop any pending request.
+                if (memory.pendingKey == key) memory.pendingKey = null
+            }
+        }
 }
 
 // ==========================================
@@ -601,9 +623,14 @@ fun HomeScreenWithSidebar(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text(text = "🔍", fontSize = 14.sp)
+                            Icon(
+                                imageVector = Icons.Outlined.Search,
+                                contentDescription = null,
+                                tint = Color(0xFF9E9E9E),
+                                modifier = Modifier.size(18.dp)
+                            )
                             Text(
-                                text = "Search TMDB & Anime...",
+                                text = "Search",
                                 color = Color(0xFF9E9E9E),
                                 fontSize = 13.sp,
                                 maxLines = 1,
@@ -615,15 +642,22 @@ fun HomeScreenWithSidebar(
                     HorizontalDivider(color = Color(0xFF2C2C2C), modifier = Modifier.padding(vertical = 4.dp))
 
                     val sections = listOf(
-                        "Home" to "Home",
-                        "Movies" to "Movies",
-                        "Series" to "TV Series",
-                        "Anime" to "Anime (Sub)",
-                        "WatchLater" to "Watch Later (${watchLaterList.size})"
+                        Triple("Home", "Home", Icons.Outlined.Home),
+                        Triple("Movies", "Movies", Icons.Outlined.Movie),
+                        Triple("Series", "TV Series", Icons.Outlined.Tv),
+                        Triple("Anime", "Anime", Icons.Outlined.Animation),
+                        Triple("WatchLater", "Watch Later (${watchLaterList.size})", Icons.Outlined.BookmarkBorder)
                     )
-                    sections.forEachIndexed { sectionIdx, (key, label) ->
+                    sections.forEachIndexed { sectionIdx, (key, label, icon) ->
                         val drawerIdx = sectionIdx + 1
                         NavigationDrawerItem(
+                            icon = {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            },
                             label = { Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium) },
                             selected = selectedSection == key,
                             onClick = {
@@ -646,17 +680,16 @@ fun HomeScreenWithSidebar(
 
                     HorizontalDivider(color = Color(0xFF2C2C2C), modifier = Modifier.padding(vertical = 4.dp))
 
-                    val linkedCount = listOfNotNull(tmdbAuth.sessionId, aniAuth.token).size
                     NavigationDrawerItem(
+                        icon = {
+                            Icon(
+                                imageVector = Icons.Outlined.Settings,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        },
                         label = {
-                            Column {
-                                Text("⚙ Settings & Accounts", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    text = if (linkedCount > 0) "$linkedCount/2 Accounts Linked" else "TMDB & AniList Login",
-                                    fontSize = 11.sp,
-                                    color = if (linkedCount > 0) Color(0xFF4CAF50) else Color.Gray
-                                )
-                            }
+                            Text("Settings and account", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                         },
                         selected = false,
                         onClick = {
@@ -723,7 +756,7 @@ fun HomeScreenWithSidebar(
                     text = when (selectedSection) {
                         "Movies" -> "Movies"
                         "Series" -> "TV Series"
-                        "Anime" -> "Anime (Sub)"
+                        "Anime" -> "Anime"
                         "WatchLater" -> "Watch Later"
                         else -> "Stream"
                     },
@@ -2227,7 +2260,7 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
                         Text("TMDB Account", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                         Text("Syncs Movies & Series Watchlists", color = Color.Gray, fontSize = 12.sp)
                     }
@@ -2240,6 +2273,8 @@ fun SettingsScreen(
                             color = if (tmdbAuth.sessionId != null) Color(0xFF4CAF50) else Color(0xFFFF9800),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1,
+                            softWrap = false,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         )
                     }
@@ -2377,7 +2412,7 @@ fun AniListSettingsCard(onAccountChanged: () -> Unit) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
                     Text("AniList Account", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                     Text("Syncs Watching & Planning Anime Lists", color = Color.Gray, fontSize = 12.sp)
                 }
@@ -2390,6 +2425,8 @@ fun AniListSettingsCard(onAccountChanged: () -> Unit) {
                         color = if (aniState.token != null) Color(0xFF4CAF50) else Color(0xFFFF9800),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1,
+                        softWrap = false,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
@@ -2421,7 +2458,7 @@ fun AniListSettingsCard(onAccountChanged: () -> Unit) {
                         .fillMaxWidth()
                         .height(44.dp)
                 ) {
-                    Text("🔐 1-Tap In-App AniList Login", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("🔐 Login", color = Color.White, fontWeight = FontWeight.Bold)
                 }
                 OutlinedTextField(
                     value = tokenInput,
