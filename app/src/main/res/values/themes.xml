@@ -2,4 +2,11 @@
 <resources>
 
     <style name="Theme.Stream" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!-- Shown while the app launches, before Compose draws the first frame -->
+    <style name="Theme.Stream.Launcher" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@drawable/splash_background</item>
+        <item name="android:statusBarColor">@color/splash_bg</item>
+        <item name="android:navigationBarColor">@color/splash_bg</item>
+    </style>
 </resources>

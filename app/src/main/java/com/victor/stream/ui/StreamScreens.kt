@@ -560,6 +560,42 @@ fun HomeLoadingSkeleton() {
     }
 }
 
+/** A row of genre pills; tapping one opens Search filtered to that type + genre. */
+@Composable
+fun GenreChipsRow(type: String, onPick: (String, String) -> Unit) {
+    val genres = listOf(
+        "Action", "Comedy", "Drama", "Horror", "Romance",
+        "Thriller", "Animation", "Fantasy", "Mystery", "Adventure"
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "Browse by Genre",
+            color = Color.White,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 14.dp)
+        )
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(genres) { g ->
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .tvFocusHighlight(RoundedCornerShape(50), focusedScale = 1.05f)
+                        .background(Color(0xFF1E1E1E))
+                        .border(1.dp, Color(0xFF383838), RoundedCornerShape(50))
+                        .clickable { onPick(type, g) }
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Text(text = g, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+    }
+}
+
 /** Big backdrop "hero" card at the top of Home for a featured title. */
 @Composable
 fun FeaturedHero(
@@ -678,6 +714,7 @@ fun HomeScreenWithSidebar(
     onOpenSettingsScreen: () -> Unit,
     onMediaClick: (MediaItemModel) -> Unit,
     onContinueClick: (WatchProgressEntry) -> Unit,
+    onOpenGenre: (String, String) -> Unit = { _, _ -> },
     focusMemory: TvFocusMemory = remember { TvFocusMemory() }
 ) {
     val focusManager = LocalFocusManager.current
@@ -1141,6 +1178,7 @@ fun HomeScreenWithSidebar(
                                 }
 
                                 "Movies" -> {
+                                    item { GenreChipsRow(type = "Movies", onPick = onOpenGenre) }
                                     val movieContinue = continueList.filter { !it.media.isSeries && !it.media.isAnime }
                                     val movieWatchLaterPre = (tmdbWatchlistMovies + watchLaterList.filter { !it.isSeries && !it.isAnime })
                                     val moviesFirst = when {
@@ -1230,6 +1268,7 @@ fun HomeScreenWithSidebar(
                                 }
 
                                 "Series" -> {
+                                    item { GenreChipsRow(type = "Series", onPick = onOpenGenre) }
                                     val seriesContinue = continueList.filter { it.media.isSeries && !it.media.isAnime }
                                     val seriesWatchLaterPre = (tmdbWatchlistSeries + watchLaterList.filter { it.isSeries && !it.isAnime })
                                     val seriesFirst = when {
@@ -2436,7 +2475,9 @@ fun CompanyTitlesScreen(
 @Composable
 fun SearchScreen(
     onBack: () -> Unit,
-    onMediaClick: (MediaItemModel) -> Unit
+    onMediaClick: (MediaItemModel) -> Unit,
+    initialType: String = "All",
+    initialGenre: String = "All"
 ) {
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -2447,8 +2488,8 @@ fun SearchScreen(
     var isSearching by remember { mutableStateOf(false) }
     var hasSearched by remember { mutableStateOf(false) }
 
-    var selectedType by remember { mutableStateOf("All") }
-    var selectedGenre by remember { mutableStateOf("All") }
+    var selectedType by remember { mutableStateOf(initialType) }
+    var selectedGenre by remember { mutableStateOf(initialGenre) }
     var selectedYear by remember { mutableStateOf("All") }
 
     var typeExpanded by remember { mutableStateOf(false) }
@@ -2470,6 +2511,11 @@ fun SearchScreen(
             searchResults = results
             isSearching = false
         }
+    }
+
+    // Opened from a genre chip: run the filtered browse right away
+    LaunchedEffect(Unit) {
+        if (initialType != "All" || initialGenre != "All") performSearch()
     }
 
     Column(

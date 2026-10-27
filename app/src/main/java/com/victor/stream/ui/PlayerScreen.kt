@@ -165,6 +165,14 @@ fun PlayerScreen(
     var settingsTab by remember { mutableStateOf("Main") }
     var statusToastLabel by remember { mutableStateOf<String?>(null) }
     var autoSkipEnabled by remember { mutableStateOf(ServiceLocator.streamCache.autoSkipEnabled) }
+    // Caption text size (1 = default). Cycles Small / Medium / Large / Extra Large.
+    var captionScale by remember { mutableFloatStateOf(1.0f) }
+    val captionScaleLabel = when (captionScale) {
+        0.8f -> "Small"
+        1.3f -> "Large"
+        1.6f -> "Extra Large"
+        else -> "Medium"
+    }
 
     var isResolvingOverlay by remember { mutableStateOf(false) }
     var resolveOverlayText by remember { mutableStateOf("Switching server...") }
@@ -790,6 +798,8 @@ fun PlayerScreen(
             },
             update = { playerView ->
                 playerView.resizeMode = playerState.resizeMode
+                // Default subtitle text fraction is ~0.0533 of view height; scale it.
+                playerView.subtitleView?.setFractionalTextSize(0.0533f * captionScale)
                 playerView.post { bindPlayerViewButtons(playerView) }
             },
             modifier = Modifier.fillMaxSize()
@@ -1087,6 +1097,21 @@ fun PlayerScreen(
                                 ) {
                                     autoSkipEnabled = !autoSkipEnabled
                                     ServiceLocator.streamCache.autoSkipEnabled = autoSkipEnabled
+                                }
+                            }
+                            item {
+                                RightDrawerMainItem(
+                                    iconText = "Aa",
+                                    isBoxedIcon = true,
+                                    title = "Caption Size",
+                                    subtitle = captionScaleLabel
+                                ) {
+                                    captionScale = when (captionScale) {
+                                        0.8f -> 1.0f
+                                        1.0f -> 1.3f
+                                        1.3f -> 1.6f
+                                        else -> 0.8f
+                                    }
                                 }
                             }
                             item {

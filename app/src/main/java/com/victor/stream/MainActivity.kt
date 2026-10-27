@@ -37,6 +37,8 @@ import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Swap the splash theme for the normal one before Compose draws
+        setTheme(R.style.Theme_Stream)
         super.onCreate(savedInstanceState)
         ServiceLocator.init(applicationContext)
         DebugCapture.attach(applicationContext)
@@ -183,6 +185,11 @@ fun AppNavHost() {
                 },
                 onMediaClick = { item -> openDetailsForMedia(item) },
                 onContinueClick = { entry -> openDetailsForMedia(entry.media) },
+                onOpenGenre = { type, genre ->
+                    navController.navigate("searchGenre/$type/${android.net.Uri.encode(genre)}") {
+                        launchSingleTop = true
+                    }
+                },
                 focusMemory = homeFocusMemory
             )
         }
@@ -191,6 +198,23 @@ fun AppNavHost() {
             SearchScreen(
                 onBack = { navController.navigateBackSafely() },
                 onMediaClick = { item -> openDetailsForMedia(item) }
+            )
+        }
+
+        composable(
+            route = "searchGenre/{type}/{genre}",
+            arguments = listOf(
+                navArgument("type") { type = NavType.StringType },
+                navArgument("genre") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val type = backStackEntry.arguments?.getString("type") ?: "All"
+            val genre = backStackEntry.arguments?.getString("genre") ?: "All"
+            SearchScreen(
+                onBack = { navController.navigateBackSafely() },
+                onMediaClick = { item -> openDetailsForMedia(item) },
+                initialType = type,
+                initialGenre = genre
             )
         }
 
