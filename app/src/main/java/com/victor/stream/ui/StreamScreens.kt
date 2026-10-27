@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
@@ -31,8 +32,18 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
@@ -61,6 +72,7 @@ import com.victor.stream.domain.WatchProgressEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -96,7 +108,17 @@ fun ResolvingOverlay(
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold
                 )
-                OutlinedButton(onClick = onCancel) {
+                val cancelFocus = remember { FocusRequester() }
+                LaunchedEffect(Unit) {
+                    delay(100)
+                    runCatching { cancelFocus.requestFocus() }
+                }
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier
+                        .focusRequester(cancelFocus)
+                        .tvFocusHighlight(RoundedCornerShape(50))
+                ) {
                     Text("Cancel", color = Color.LightGray)
                 }
             }
@@ -109,7 +131,10 @@ fun ResolvingOverlay(
 fun ContinueWatchingRow(
     continueList: List<WatchProgressEntry>,
     onContinueClick: (WatchProgressEntry) -> Unit,
-    onRemoveEntry: (Int) -> Unit
+    onRemoveEntry: (Int) -> Unit,
+    rowKey: String = "continue",
+    isFirstRow: Boolean = false,
+    focusMemory: TvFocusMemory? = null
 ) {
     var showPopupFor by remember { mutableStateOf<WatchProgressEntry?>(null) }
 
@@ -125,21 +150,19 @@ fun ContinueWatchingRow(
             contentPadding = PaddingValues(horizontal = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            items(continueList) { entry ->
-                var isFocused by remember { mutableStateOf(false) }
+            itemsIndexed(continueList) { index, entry ->
+                val itemKey = "$rowKey#${entry.media.id}"
                 Column(
                     modifier = Modifier
                         .width(115.dp)
+                        .tvRememberedFocus(itemKey, index, isFirstRow, focusMemory)
+                        .tvFocusHighlight(RoundedCornerShape(8.dp))
                         .clip(RoundedCornerShape(8.dp))
-                        .border(
-                            if (isFocused) 2.dp else 0.dp,
-                            if (isFocused) Color.White else Color.Transparent,
-                            RoundedCornerShape(8.dp)
-                        )
-                        .onFocusChanged { isFocused = it.isFocused }
-                        .focusable()
                         .combinedClickable(
-                            onClick = { onContinueClick(entry) },
+                            onClick = {
+                                focusMemory?.pendingKey = itemKey
+                                onContinueClick(entry)
+                            },
                             onLongClick = { showPopupFor = entry }
                         )
                 ) {
@@ -205,11 +228,12 @@ fun ContinueWatchingRow(
                         showPopupFor?.let { onRemoveEntry(it.media.id) }
                         showPopupFor = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE50914))
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE50914)),
+                    modifier = Modifier.tvFocusHighlight(RoundedCornerShape(12.dp))
                 ) { Text("Remove", color = Color.White) }
             },
             dismissButton = {
-                OutlinedButton(onClick = { showPopupFor = null }) {
+                OutlinedButton(onClick = { showPopupFor = null }, modifier = Modifier.tvFocusHighlight(RoundedCornerShape(12.dp))) {
                     Text("Cancel", color = Color.White)
                 }
             }
@@ -223,7 +247,9 @@ fun MediaCarouselRow(
     items: List<MediaItemModel>,
     showRankBadge: Boolean = false,
     onMediaClick: (MediaItemModel) -> Unit,
-    onWatchLaterChanged: () -> Unit
+    onWatchLaterChanged: () -> Unit,
+    isFirstRow: Boolean = false,
+    focusMemory: TvFocusMemory? = null
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
@@ -244,7 +270,11 @@ fun MediaCarouselRow(
                     isWatchLaterScreen = false,
                     onClick = { onMediaClick(item) },
                     onWatchLaterChanged = onWatchLaterChanged,
-                    modifier = Modifier.width(115.dp)
+                    modifier = Modifier.width(115.dp),
+                    focusKey = "$title#${item.id}",
+                    focusIndex = index,
+                    isFirstRow = isFirstRow,
+                    focusMemory = focusMemory
                 )
             }
         }
@@ -259,24 +289,30 @@ fun PosterCard(
     isWatchLaterScreen: Boolean,
     modifier: Modifier = Modifier.fillMaxWidth(),
     onClick: () -> Unit,
-    onWatchLaterChanged: () -> Unit
+    onWatchLaterChanged: () -> Unit,
+    focusKey: String? = null,
+    focusIndex: Int = -1,
+    isFirstRow: Boolean = false,
+    focusMemory: TvFocusMemory? = null
 ) {
     val scope = rememberCoroutineScope()
-    var isFocused by remember { mutableStateOf(false) }
     var showWatchLaterPopup by remember { mutableStateOf(false) }
 
+    // NOTE: no separate .focusable() here. combinedClickable is already focusable;
+    // an extra focusable() created two focus stops, so OK had to be pressed twice.
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .border(
-                if (isFocused) 2.dp else 0.dp,
-                if (isFocused) Color.White else Color.Transparent,
-                RoundedCornerShape(8.dp)
+            .then(
+                if (focusKey != null) Modifier.tvRememberedFocus(focusKey, focusIndex, isFirstRow, focusMemory)
+                else Modifier
             )
-            .onFocusChanged { isFocused = it.isFocused }
-            .focusable()
+            .tvFocusHighlight(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(8.dp))
             .combinedClickable(
-                onClick = onClick,
+                onClick = {
+                    if (focusKey != null) focusMemory?.pendingKey = focusKey
+                    onClick()
+                },
                 onLongClick = { showWatchLaterPopup = true }
             )
     ) {
@@ -354,18 +390,49 @@ fun PosterCard(
                         showWatchLaterPopup = false
                         onWatchLaterChanged()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE50914))
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE50914)),
+                    modifier = Modifier.tvFocusHighlight(RoundedCornerShape(12.dp))
                 ) {
                     Text(if (isWatchLaterScreen) "Remove" else "Watch Later", color = Color.White)
                 }
             },
             dismissButton = {
-                OutlinedButton(onClick = { showWatchLaterPopup = false }) {
+                OutlinedButton(onClick = { showWatchLaterPopup = false }, modifier = Modifier.tvFocusHighlight(RoundedCornerShape(12.dp))) {
                     Text("Cancel", color = Color.White)
                 }
             }
         )
     }
+}
+
+/**
+ * Gives a poster remote focus when [TvFocusMemory] says it should have it:
+ * the very first poster of the first row on launch, or the poster you opened
+ * when you come back from the details screen. Also records the last focused poster.
+ */
+fun Modifier.tvRememberedFocus(
+    key: String,
+    index: Int,
+    isFirstRow: Boolean,
+    memory: TvFocusMemory?
+): Modifier = composed {
+    val isTv = rememberIsTv()
+    // Phones are driven by touch, so only steer focus automatically on TV
+    if (memory == null || !isTv) return@composed this
+    val requester = remember { FocusRequester() }
+    val wantsFocus = memory.pendingKey == key ||
+            (memory.pendingKey == TvFocusMemory.FIRST_ITEM && isFirstRow && index == 0)
+    LaunchedEffect(wantsFocus) {
+        if (wantsFocus) {
+            delay(80)
+            if (runCatching { requester.requestFocus() }.isSuccess) {
+                memory.pendingKey = null
+            }
+        }
+    }
+    this
+        .focusRequester(requester)
+        .onFocusChanged { if (it.hasFocus) memory.lastFocusedKey = key }
 }
 
 // ==========================================
@@ -393,12 +460,60 @@ fun HomeScreenWithSidebar(
     onOpenSearchScreen: () -> Unit,
     onOpenSettingsScreen: () -> Unit,
     onMediaClick: (MediaItemModel) -> Unit,
-    onContinueClick: (WatchProgressEntry) -> Unit
+    onContinueClick: (WatchProgressEntry) -> Unit,
+    focusMemory: TvFocusMemory = remember { TvFocusMemory() }
 ) {
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val isTv = rememberIsTv()
+
+    // Drawer (sidebar) focus handling for the TV remote
+    val drawerItemCount = 7 // search + 5 sections + settings
+    val drawerFocusRequesters = remember { List(drawerItemCount) { FocusRequester() } }
+    var focusedDrawerIndex by remember { mutableIntStateOf(-1) }
+    var suppressAutoOpenUntil by remember { mutableLongStateOf(0L) }
+
+    fun closeDrawerAndRestoreFocus(newSection: Boolean) {
+        // Don't let the ☰ button re-open the drawer while focus is travelling back
+        suppressAutoOpenUntil = System.currentTimeMillis() + 900L
+        focusMemory.pendingKey = if (newSection) {
+            TvFocusMemory.FIRST_ITEM
+        } else {
+            focusMemory.lastFocusedKey ?: TvFocusMemory.FIRST_ITEM
+        }
+        scope.launch { drawerState.close() }
+    }
+
+    fun openDrawerFromRemote() {
+        if (drawerState.isOpen || drawerState.isAnimationRunning) return
+        scope.launch { drawerState.open() }
+    }
+
+    // If the remembered poster isn't on screen any more, fall back to the first poster
+    LaunchedEffect(focusMemory.pendingKey, isLoading, selectedSection) {
+        val pending = focusMemory.pendingKey
+        if (isTv && !isLoading && pending != null && pending != TvFocusMemory.FIRST_ITEM) {
+            delay(1500)
+            if (focusMemory.pendingKey == pending) focusMemory.pendingKey = TvFocusMemory.FIRST_ITEM
+        }
+    }
+
+    // When the drawer opens, put focus on the currently selected section
+    LaunchedEffect(drawerState.targetValue) {
+        if (drawerState.targetValue == DrawerValue.Open) {
+            val idx = when (selectedSection) {
+                "Movies" -> 2
+                "Series" -> 3
+                "Anime" -> 4
+                "WatchLater" -> 5
+                else -> 1
+            }
+            delay(120)
+            runCatching { drawerFocusRequesters[idx].requestFocus() }
+        }
+    }
 
     var continueList by remember { mutableStateOf(ServiceLocator.prefsStore.getContinueWatching()) }
     var watchLaterList by remember { mutableStateOf(ServiceLocator.prefsStore.getWatchLater()) }
@@ -413,7 +528,7 @@ fun HomeScreenWithSidebar(
     }
 
     BackHandler(enabled = drawerState.isOpen) {
-        scope.launch { drawerState.close() }
+        closeDrawerAndRestoreFocus(newSection = false)
     }
 
     ModalNavigationDrawer(
@@ -428,7 +543,22 @@ fun HomeScreenWithSidebar(
                     modifier = Modifier
                         .fillMaxSize()
                         .statusBarsPadding()
-                        .padding(18.dp),
+                        .padding(18.dp)
+                        .onPreviewKeyEvent { ev ->
+                            if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                            when (ev.key) {
+                                // Right arrow closes the sidebar and goes back to the posters
+                                Key.DirectionRight -> {
+                                    closeDrawerAndRestoreFocus(newSection = false)
+                                    true
+                                }
+                                // Keep focus inside the sidebar at the top / bottom edges
+                                Key.DirectionUp -> focusedDrawerIndex == 0
+                                Key.DirectionDown -> focusedDrawerIndex == drawerItemCount - 1
+                                Key.DirectionLeft -> true
+                                else -> false
+                            }
+                        },
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
@@ -441,6 +571,7 @@ fun HomeScreenWithSidebar(
 
                     Surface(
                         onClick = {
+                            focusMemory.pendingKey = focusMemory.lastFocusedKey ?: TvFocusMemory.FIRST_ITEM
                             scope.launch {
                                 drawerState.close()
                                 onOpenSearchScreen()
@@ -452,6 +583,9 @@ fun HomeScreenWithSidebar(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(44.dp)
+                            .focusRequester(drawerFocusRequesters[0])
+                            .onFocusChanged { if (it.hasFocus) focusedDrawerIndex = 0 }
+                            .tvFocusHighlight(RoundedCornerShape(24.dp), focusedScale = 1.03f)
                     ) {
                         Row(
                             modifier = Modifier
@@ -480,14 +614,20 @@ fun HomeScreenWithSidebar(
                         "Anime" to "Anime (Sub)",
                         "WatchLater" to "Watch Later (${watchLaterList.size})"
                     )
-                    sections.forEach { (key, label) ->
+                    sections.forEachIndexed { sectionIdx, (key, label) ->
+                        val drawerIdx = sectionIdx + 1
                         NavigationDrawerItem(
                             label = { Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium) },
                             selected = selectedSection == key,
                             onClick = {
+                                val changed = selectedSection != key
                                 onSelectSection(key)
-                                scope.launch { drawerState.close() }
+                                closeDrawerAndRestoreFocus(newSection = changed)
                             },
+                            modifier = Modifier
+                                .focusRequester(drawerFocusRequesters[drawerIdx])
+                                .onFocusChanged { if (it.hasFocus) focusedDrawerIndex = drawerIdx }
+                                .tvFocusHighlight(RoundedCornerShape(50), focusedScale = 1.03f),
                             colors = NavigationDrawerItemDefaults.colors(
                                 selectedContainerColor = Color(0xFFE50914),
                                 unselectedContainerColor = Color.Transparent,
@@ -513,11 +653,16 @@ fun HomeScreenWithSidebar(
                         },
                         selected = false,
                         onClick = {
+                            focusMemory.pendingKey = focusMemory.lastFocusedKey ?: TvFocusMemory.FIRST_ITEM
                             scope.launch {
                                 drawerState.close()
                                 onOpenSettingsScreen()
                             }
                         },
+                        modifier = Modifier
+                            .focusRequester(drawerFocusRequesters[drawerItemCount - 1])
+                            .onFocusChanged { if (it.hasFocus) focusedDrawerIndex = drawerItemCount - 1 }
+                            .tvFocusHighlight(RoundedCornerShape(50), focusedScale = 1.03f),
                         colors = NavigationDrawerItemDefaults.colors(
                             unselectedContainerColor = Color(0xFF242424),
                             unselectedTextColor = Color.White
@@ -549,6 +694,15 @@ fun HomeScreenWithSidebar(
                     },
                     modifier = Modifier
                         .align(Alignment.CenterStart)
+                        .tvFocusHighlight(RoundedCornerShape(50), focusedScale = 1.12f)
+                        .onFocusChanged { state ->
+                            // TV: landing on ☰ with the remote opens the sidebar straight away
+                            if (isTv && state.isFocused &&
+                                System.currentTimeMillis() > suppressAutoOpenUntil
+                            ) {
+                                openDrawerFromRemote()
+                            }
+                        }
                         .size(36.dp)
                 ) {
                     Text(text = "☰", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -591,14 +745,18 @@ fun HomeScreenWithSidebar(
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                                 modifier = Modifier.fillMaxSize()
                             ) {
-                                items(watchLaterList) { item ->
+                                gridItemsIndexed(watchLaterList) { index, item ->
                                     PosterCard(
                                         item = item,
                                         isWatchLaterScreen = true,
                                         onClick = { onMediaClick(item) },
                                         onWatchLaterChanged = {
                                             watchLaterList = ServiceLocator.prefsStore.getWatchLater()
-                                        }
+                                        },
+                                        focusKey = "watchLaterGrid#${item.id}",
+                                        focusIndex = index,
+                                        isFirstRow = true,
+                                        focusMemory = focusMemory
                                     )
                                 }
                             }
@@ -607,6 +765,7 @@ fun HomeScreenWithSidebar(
 
                     "Anime" -> {
                         AnimeCatalogSection(
+                            focusMemory = focusMemory,
                             trendingAnime = trendingAnime,
                             popularAnime = popularAnime,
                             anilistWatchingList = anilistWatchingList,
@@ -626,9 +785,17 @@ fun HomeScreenWithSidebar(
                         ) {
                             when (selectedSection) {
                                 "Home" -> {
+                                    val homeFirst = when {
+                                        continueList.isNotEmpty() -> "continue"
+                                        watchLaterList.isNotEmpty() -> "watchLater"
+                                        else -> "trending"
+                                    }
                                     if (continueList.isNotEmpty()) {
                                         item {
                                             ContinueWatchingRow(
+                                                rowKey = "home-continue",
+                                                isFirstRow = homeFirst == "continue",
+                                                focusMemory = focusMemory,
                                                 continueList = continueList,
                                                 onContinueClick = onContinueClick,
                                                 onRemoveEntry = { id ->
@@ -640,7 +807,9 @@ fun HomeScreenWithSidebar(
                                     if (watchLaterList.isNotEmpty()) {
                                         item {
                                             MediaCarouselRow(
+                                                focusMemory = focusMemory,
                                                 title = "Watch Later / Watchlist",
+                                                isFirstRow = homeFirst == "watchLater",
                                                 items = watchLaterList,
                                                 showRankBadge = false,
                                                 onMediaClick = onMediaClick,
@@ -652,7 +821,9 @@ fun HomeScreenWithSidebar(
                                     }
                                     item {
                                         MediaCarouselRow(
+                                            focusMemory = focusMemory,
                                             title = "Trending Movies & TV Shows",
+                                            isFirstRow = homeFirst == "trending",
                                             items = trendingAll,
                                             showRankBadge = false,
                                             onMediaClick = onMediaClick,
@@ -664,6 +835,7 @@ fun HomeScreenWithSidebar(
                                     if (trendingAnime.isNotEmpty()) {
                                         item {
                                             MediaCarouselRow(
+                                                focusMemory = focusMemory,
                                                 title = "Trending Anime (Sub)",
                                                 items = trendingAnime,
                                                 showRankBadge = false,
@@ -676,6 +848,7 @@ fun HomeScreenWithSidebar(
                                     }
                                     item {
                                         MediaCarouselRow(
+                                            focusMemory = focusMemory,
                                             title = "Trending Movies Today",
                                             items = trendingMovies,
                                             showRankBadge = false,
@@ -687,6 +860,7 @@ fun HomeScreenWithSidebar(
                                     }
                                     item {
                                         MediaCarouselRow(
+                                            focusMemory = focusMemory,
                                             title = "Trending TV Series Today",
                                             items = trendingSeries,
                                             showRankBadge = false,
@@ -700,9 +874,18 @@ fun HomeScreenWithSidebar(
 
                                 "Movies" -> {
                                     val movieContinue = continueList.filter { !it.media.isSeries && !it.media.isAnime }
+                                    val movieWatchLaterPre = (tmdbWatchlistMovies + watchLaterList.filter { !it.isSeries && !it.isAnime })
+                                    val moviesFirst = when {
+                                        movieContinue.isNotEmpty() -> "continue"
+                                        movieWatchLaterPre.isNotEmpty() -> "watchLater"
+                                        else -> "top10"
+                                    }
                                     if (movieContinue.isNotEmpty()) {
                                         item {
                                             ContinueWatchingRow(
+                                                rowKey = "movies-continue",
+                                                isFirstRow = moviesFirst == "continue",
+                                                focusMemory = focusMemory,
                                                 continueList = movieContinue,
                                                 onContinueClick = onContinueClick,
                                                 onRemoveEntry = { id ->
@@ -715,7 +898,9 @@ fun HomeScreenWithSidebar(
                                     if (movieWatchLater.isNotEmpty()) {
                                         item {
                                             MediaCarouselRow(
+                                                focusMemory = focusMemory,
                                                 title = "Movies Watchlist (TMDB Synced)",
+                                                isFirstRow = moviesFirst == "watchLater",
                                                 items = movieWatchLater,
                                                 showRankBadge = false,
                                                 onMediaClick = onMediaClick,
@@ -727,7 +912,9 @@ fun HomeScreenWithSidebar(
                                     }
                                     item {
                                         MediaCarouselRow(
+                                            focusMemory = focusMemory,
                                             title = "Top 10 Movies Today",
+                                            isFirstRow = moviesFirst == "top10",
                                             items = trendingMovies.take(10),
                                             showRankBadge = true,
                                             onMediaClick = onMediaClick,
@@ -738,6 +925,7 @@ fun HomeScreenWithSidebar(
                                     }
                                     item {
                                         MediaCarouselRow(
+                                            focusMemory = focusMemory,
                                             title = "Current Trending Movies",
                                             items = trendingMovies,
                                             showRankBadge = false,
@@ -749,6 +937,7 @@ fun HomeScreenWithSidebar(
                                     }
                                     item {
                                         MediaCarouselRow(
+                                            focusMemory = focusMemory,
                                             title = "Top Rated Movies",
                                             items = topRatedMovies,
                                             showRankBadge = false,
@@ -760,6 +949,7 @@ fun HomeScreenWithSidebar(
                                     }
                                     item {
                                         MediaCarouselRow(
+                                            focusMemory = focusMemory,
                                             title = "Popular Movies",
                                             items = popularMovies,
                                             showRankBadge = false,
@@ -773,9 +963,18 @@ fun HomeScreenWithSidebar(
 
                                 "Series" -> {
                                     val seriesContinue = continueList.filter { it.media.isSeries && !it.media.isAnime }
+                                    val seriesWatchLaterPre = (tmdbWatchlistSeries + watchLaterList.filter { it.isSeries && !it.isAnime })
+                                    val seriesFirst = when {
+                                        seriesContinue.isNotEmpty() -> "continue"
+                                        seriesWatchLaterPre.isNotEmpty() -> "watchLater"
+                                        else -> "top10"
+                                    }
                                     if (seriesContinue.isNotEmpty()) {
                                         item {
                                             ContinueWatchingRow(
+                                                rowKey = "series-continue",
+                                                isFirstRow = seriesFirst == "continue",
+                                                focusMemory = focusMemory,
                                                 continueList = seriesContinue,
                                                 onContinueClick = onContinueClick,
                                                 onRemoveEntry = { id ->
@@ -788,7 +987,9 @@ fun HomeScreenWithSidebar(
                                     if (seriesWatchLater.isNotEmpty()) {
                                         item {
                                             MediaCarouselRow(
+                                                focusMemory = focusMemory,
                                                 title = "Series Watchlist (TMDB Synced)",
+                                                isFirstRow = seriesFirst == "watchLater",
                                                 items = seriesWatchLater,
                                                 showRankBadge = false,
                                                 onMediaClick = onMediaClick,
@@ -800,7 +1001,9 @@ fun HomeScreenWithSidebar(
                                     }
                                     item {
                                         MediaCarouselRow(
+                                            focusMemory = focusMemory,
                                             title = "Top 10 TV Series Today",
+                                            isFirstRow = seriesFirst == "top10",
                                             items = trendingSeries.take(10),
                                             showRankBadge = true,
                                             onMediaClick = onMediaClick,
@@ -811,6 +1014,7 @@ fun HomeScreenWithSidebar(
                                     }
                                     item {
                                         MediaCarouselRow(
+                                            focusMemory = focusMemory,
                                             title = "Current Trending TV Series",
                                             items = trendingSeries,
                                             showRankBadge = false,
@@ -822,6 +1026,7 @@ fun HomeScreenWithSidebar(
                                     }
                                     item {
                                         MediaCarouselRow(
+                                            focusMemory = focusMemory,
                                             title = "Top Rated TV Series",
                                             items = topRatedSeries,
                                             showRankBadge = false,
@@ -833,6 +1038,7 @@ fun HomeScreenWithSidebar(
                                     }
                                     item {
                                         MediaCarouselRow(
+                                            focusMemory = focusMemory,
                                             title = "Popular TV Series",
                                             items = popularSeries,
                                             showRankBadge = false,
@@ -854,6 +1060,7 @@ fun HomeScreenWithSidebar(
 
 @Composable
 fun AnimeCatalogSection(
+    focusMemory: TvFocusMemory? = null,
     trendingAnime: List<MediaItemModel>,
     popularAnime: List<MediaItemModel>,
     anilistWatchingList: List<MediaItemModel>,
@@ -905,7 +1112,8 @@ fun AnimeCatalogSection(
                             isFetchingNow = false
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE50914))
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE50914)),
+                    modifier = Modifier.tvFocusHighlight(RoundedCornerShape(12.dp))
                 ) {
                     Text("Retry Loading Anime", color = Color.White)
                 }
@@ -917,14 +1125,22 @@ fun AnimeCatalogSection(
             contentPadding = PaddingValues(vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
+            val animeFirst = when {
+                anilistWatchingList.isNotEmpty() -> "watching"
+                anilistPlanningList.isNotEmpty() -> "planning"
+                localTrending.isNotEmpty() -> "top10"
+                else -> "popular"
+            }
             if (anilistWatchingList.isNotEmpty()) {
                 item {
                     MediaCarouselRow(
                         title = "Currently Watching (AniList Synced)",
+                        isFirstRow = animeFirst == "watching",
                         items = anilistWatchingList,
                         showRankBadge = false,
                         onMediaClick = onAnimeClick,
-                        onWatchLaterChanged = onWatchLaterChanged
+                        onWatchLaterChanged = onWatchLaterChanged,
+                        focusMemory = focusMemory
                     )
                 }
             }
@@ -932,10 +1148,12 @@ fun AnimeCatalogSection(
                 item {
                     MediaCarouselRow(
                         title = "Planning / Watchlist (AniList Synced)",
+                        isFirstRow = animeFirst == "planning",
                         items = anilistPlanningList,
                         showRankBadge = false,
                         onMediaClick = onAnimeClick,
-                        onWatchLaterChanged = onWatchLaterChanged
+                        onWatchLaterChanged = onWatchLaterChanged,
+                        focusMemory = focusMemory
                     )
                 }
             }
@@ -943,10 +1161,12 @@ fun AnimeCatalogSection(
                 item {
                     MediaCarouselRow(
                         title = "Top 10 Trending Anime (Sub)",
+                        isFirstRow = animeFirst == "top10",
                         items = localTrending.take(10),
                         showRankBadge = true,
                         onMediaClick = onAnimeClick,
-                        onWatchLaterChanged = onWatchLaterChanged
+                        onWatchLaterChanged = onWatchLaterChanged,
+                        focusMemory = focusMemory
                     )
                 }
                 item {
@@ -955,7 +1175,8 @@ fun AnimeCatalogSection(
                         items = localTrending,
                         showRankBadge = false,
                         onMediaClick = onAnimeClick,
-                        onWatchLaterChanged = onWatchLaterChanged
+                        onWatchLaterChanged = onWatchLaterChanged,
+                        focusMemory = focusMemory
                     )
                 }
             }
@@ -963,10 +1184,12 @@ fun AnimeCatalogSection(
                 item {
                     MediaCarouselRow(
                         title = "All-Time Popular Anime (Sub)",
+                        isFirstRow = animeFirst == "popular",
                         items = localPopular,
                         showRankBadge = false,
                         onMediaClick = onAnimeClick,
-                        onWatchLaterChanged = onWatchLaterChanged
+                        onWatchLaterChanged = onWatchLaterChanged,
+                        focusMemory = focusMemory
                     )
                 }
             }
@@ -994,8 +1217,23 @@ fun MediaDetailsScreen(
         ServiceLocator.prefsStore.getContinueWatching().firstOrNull { it.media.id == media.id }
     }
 
+    // ---- TV remote focus ----
+    val isTv = rememberIsTv()
+    val playFocusRequester = remember { FocusRequester() }
+    // Survives going into the player and coming back, so focus returns to the episode you played
+    var lastPlayedEpisodeNum by rememberSaveable(initialMedia.id) { mutableIntStateOf(-1) }
+    var lastPlayedSeasonNum by rememberSaveable(initialMedia.id) { mutableIntStateOf(-1) }
+    var seasonFocusTarget by remember { mutableStateOf<Int?>(null) }
+    var episodeFocusTarget by remember { mutableStateOf<Int?>(null) }
+    var initialFocusDone by remember { mutableStateOf(false) }
+    var detailsLoaded by remember { mutableStateOf(!initialMedia.isSeries) }
+    val seasonsRowState = rememberLazyListState()
+    val episodesRowState = rememberLazyListState()
+
     var seasonsList by remember { mutableStateOf<List<SeasonInfo>>(initialMedia.seasons) }
-    var selectedSeasonNum by remember { mutableIntStateOf(continueEntry?.seasonNumber ?: 1) }
+    var selectedSeasonNum by remember {
+        mutableIntStateOf(if (lastPlayedSeasonNum > 0) lastPlayedSeasonNum else continueEntry?.seasonNumber ?: 1)
+    }
     var episodesList by remember { mutableStateOf<List<EpisodeRef>>(emptyList()) }
     var isEpisodesLoading by remember { mutableStateOf(false) }
 
@@ -1017,6 +1255,7 @@ fun MediaDetailsScreen(
                 selectedSeasonNum = seasonsList.first().seasonNumber
             }
         }
+        detailsLoaded = true
     }
 
     LaunchedEffect(media.id, selectedSeasonNum) {
@@ -1031,6 +1270,42 @@ fun MediaDetailsScreen(
     }
 
     val episodeChunks = remember(episodesList) { episodesList.chunked(50) }
+
+    // TV: decide where the remote focus starts on this screen.
+    //  - Movies: the Play (or Resume) button
+    //  - Series: the episode you just watched, otherwise the selected season poster,
+    //    otherwise the first episode poster
+    LaunchedEffect(isTv, detailsLoaded, isEpisodesLoading, episodesList.size, seasonsList.size) {
+        if (!isTv || initialFocusDone || !detailsLoaded) return@LaunchedEffect
+        if (!media.isSeries) {
+            delay(150)
+            runCatching { playFocusRequester.requestFocus() }
+            initialFocusDone = true
+            return@LaunchedEffect
+        }
+        val episodesReady = !isEpisodesLoading && episodesList.isNotEmpty()
+        when {
+            lastPlayedEpisodeNum > 0 && lastPlayedSeasonNum == selectedSeasonNum && episodesReady -> {
+                val chunkIdx = episodeChunks.indexOfFirst { chunk -> chunk.any { it.episodeNumber == lastPlayedEpisodeNum } }
+                if (chunkIdx >= 0) selectedChunkIndex = chunkIdx
+                episodeFocusTarget = lastPlayedEpisodeNum
+                initialFocusDone = true
+            }
+            lastPlayedEpisodeNum <= 0 && seasonsList.size > 1 -> {
+                seasonFocusTarget = selectedSeasonNum
+                initialFocusDone = true
+            }
+            episodesReady -> {
+                val firstEp = if (episodeSortAscending) {
+                    episodeChunks.firstOrNull()?.minByOrNull { it.episodeNumber }
+                } else {
+                    episodeChunks.firstOrNull()?.maxByOrNull { it.episodeNumber }
+                }
+                episodeFocusTarget = firstEp?.episodeNumber
+                initialFocusDone = true
+            }
+        }
+    }
 
     fun startStreamResolution(episode: EpisodeRef?, startFromZero: Boolean, origin: PlayOrigin) {
         activeResolveJob?.cancel()
@@ -1105,6 +1380,13 @@ fun MediaDetailsScreen(
         }
     }
 
+    // Remote Back while "Connecting servers..." cancels instead of leaving the page
+    BackHandler(enabled = isResolving) {
+        activeResolveJob?.cancel()
+        ServiceLocator.streamResolver.cancelActive()
+        isResolving = false
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1126,7 +1408,9 @@ fun MediaDetailsScreen(
                 OutlinedButton(
                     onClick = onBack,
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                    modifier = Modifier.height(36.dp)
+                    modifier = Modifier
+                        .tvFocusHighlight(RoundedCornerShape(50))
+                        .height(36.dp)
                 ) {
                     Text("← Back", color = Color.White, fontSize = 13.sp)
                 }
@@ -1167,7 +1451,9 @@ fun MediaDetailsScreen(
                         containerColor = if (inWatchLater) Color(0xFF3A3A3A) else Color(0xFF2C2C2C)
                     ),
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                    modifier = Modifier.height(36.dp)
+                    modifier = Modifier
+                        .tvFocusHighlight(RoundedCornerShape(50))
+                        .height(36.dp)
                 ) {
                     Text(
                         text = if (inWatchLater) "✓ Saved" else "+ Watch Later",
@@ -1206,12 +1492,21 @@ fun MediaDetailsScreen(
                                         title = continueEntry.episodeTitle ?: "Episode ${continueEntry.episodeNumber ?: 1}"
                                     )
                                 } else null
+                                if (epRef != null) {
+                                    lastPlayedEpisodeNum = epRef.episodeNumber
+                                    lastPlayedSeasonNum = epRef.seasonNumber
+                                }
                                 startStreamResolution(epRef, startFromZero = false, origin = PlayOrigin.RESUME)
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
                             shape = RoundedCornerShape(8.dp),
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                             modifier = Modifier
+                                .then(
+                                    // Movies with saved progress: Resume is the first thing focused
+                                    if (!media.isSeries) Modifier.focusRequester(playFocusRequester) else Modifier
+                                )
+                                .tvFocusHighlight(RoundedCornerShape(8.dp))
                                 .fillMaxWidth()
                                 .height(34.dp)
                         ) {
@@ -1277,7 +1572,12 @@ fun MediaDetailsScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE50914)),
                             shape = RoundedCornerShape(8.dp),
                             contentPadding = PaddingValues(horizontal = 18.dp, vertical = 6.dp),
-                            modifier = Modifier.height(38.dp)
+                            modifier = Modifier
+                                .then(
+                                    if (continueEntry == null) Modifier.focusRequester(playFocusRequester) else Modifier
+                                )
+                                .tvFocusHighlight(RoundedCornerShape(8.dp), focusedScale = 1.08f)
+                                .height(38.dp)
                         ) {
                             Text(
                                 text = if (media.isAnime) "▶ Play Movie (SUB)" else "▶ Play Movie",
@@ -1303,7 +1603,9 @@ fun MediaDetailsScreen(
                         OutlinedButton(
                             onClick = { seasonSortAscending = !seasonSortAscending },
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                            modifier = Modifier.height(30.dp)
+                            modifier = Modifier
+                                .tvFocusHighlight(RoundedCornerShape(50))
+                                .height(30.dp)
                         ) {
                             Text(
                                 text = if (seasonSortAscending) "1 → ${seasonsList.size}" else "${seasonsList.size} → 1",
@@ -1319,22 +1621,38 @@ fun MediaDetailsScreen(
                         seasonsList.sortedByDescending { it.seasonNumber }
                     }
 
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    LaunchedEffect(seasonFocusTarget, sortedSeasons) {
+                        val target = seasonFocusTarget ?: return@LaunchedEffect
+                        val idx = sortedSeasons.indexOfFirst { it.seasonNumber == target }
+                        if (idx >= 0) runCatching { seasonsRowState.scrollToItem(idx) }
+                    }
+
+                    LazyRow(
+                        state = seasonsRowState,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(4.dp)
+                    ) {
                         items(sortedSeasons) { season ->
                             val isSelected = selectedSeasonNum == season.seasonNumber
-                            var isFocused by remember { mutableStateOf(false) }
+                            val seasonRequester = remember { FocusRequester() }
+                            LaunchedEffect(seasonFocusTarget) {
+                                if (seasonFocusTarget == season.seasonNumber) {
+                                    delay(80)
+                                    runCatching { seasonRequester.requestFocus() }
+                                    seasonFocusTarget = null
+                                }
+                            }
                             Column(
                                 modifier = Modifier
                                     .width(100.dp)
+                                    .focusRequester(seasonRequester)
+                                    .tvFocusHighlight(RoundedCornerShape(8.dp))
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(if (isSelected) Color(0xFF2C1A1A) else Color(0xFF1A1A1A))
-                                    .border(
-                                        if (isSelected || isFocused) 2.dp else 0.dp,
-                                        if (isSelected) Color(0xFFE50914) else Color.White,
-                                        RoundedCornerShape(8.dp)
+                                    .then(
+                                        if (isSelected) Modifier.border(2.dp, Color(0xFFE50914), RoundedCornerShape(8.dp))
+                                        else Modifier
                                     )
-                                    .onFocusChanged { isFocused = it.isFocused }
-                                    .focusable()
                                     .clickable { selectedSeasonNum = season.seasonNumber }
                             ) {
                                 AsyncImage(
@@ -1362,7 +1680,10 @@ fun MediaDetailsScreen(
 
                 if (episodeChunks.size > 1) {
                     Text(text = "Episode Ranges", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(4.dp)
+                    ) {
                         itemsIndexed(episodeChunks) { idx, chunk ->
                             val firstEp = chunk.first().episodeNumber
                             val lastEp = chunk.last().episodeNumber
@@ -1374,7 +1695,9 @@ fun MediaDetailsScreen(
                                 ),
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                                 shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.height(32.dp)
+                                modifier = Modifier
+                                    .tvFocusHighlight(RoundedCornerShape(8.dp))
+                                    .height(32.dp)
                             ) {
                                 Text("EP $firstEp – $lastEp", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
@@ -1398,7 +1721,9 @@ fun MediaDetailsScreen(
                     OutlinedButton(
                         onClick = { episodeSortAscending = !episodeSortAscending },
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                        modifier = Modifier.height(30.dp)
+                        modifier = Modifier
+                            .tvFocusHighlight(RoundedCornerShape(50))
+                            .height(30.dp)
                     ) {
                         Text(
                             text = if (episodeSortAscending) "Ascending ↑" else "Descending ↓",
@@ -1424,12 +1749,26 @@ fun MediaDetailsScreen(
                         currentChunk.sortedByDescending { it.episodeNumber }
                     }
 
+                    LaunchedEffect(episodeFocusTarget, sortedEpisodes) {
+                        val target = episodeFocusTarget ?: return@LaunchedEffect
+                        val idx = sortedEpisodes.indexOfFirst { it.episodeNumber == target }
+                        if (idx >= 0) runCatching { episodesRowState.scrollToItem(idx) }
+                    }
+
                     LazyRow(
+                        state = episodesRowState,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        contentPadding = PaddingValues(bottom = 16.dp)
+                        contentPadding = PaddingValues(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 16.dp)
                     ) {
                         items(sortedEpisodes) { ep ->
-                            var epFocused by remember { mutableStateOf(false) }
+                            val epRequester = remember { FocusRequester() }
+                            LaunchedEffect(episodeFocusTarget) {
+                                if (episodeFocusTarget == ep.episodeNumber) {
+                                    delay(80)
+                                    runCatching { epRequester.requestFocus() }
+                                    episodeFocusTarget = null
+                                }
+                            }
                             val epSavedPos = remember(media.id, selectedSeasonNum, ep.episodeNumber) {
                                 ServiceLocator.prefsStore.getEpisodePositionMs(
                                     media.id,
@@ -1440,16 +1779,13 @@ fun MediaDetailsScreen(
                             Column(
                                 modifier = Modifier
                                     .width(145.dp)
+                                    .focusRequester(epRequester)
+                                    .tvFocusHighlight(RoundedCornerShape(8.dp))
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(Color(0xFF1A1A1A))
-                                    .border(
-                                        if (epFocused) 2.dp else 0.dp,
-                                        if (epFocused) Color.White else Color.Transparent,
-                                        RoundedCornerShape(8.dp)
-                                    )
-                                    .onFocusChanged { epFocused = it.isFocused }
-                                    .focusable()
                                     .clickable {
+                                        lastPlayedEpisodeNum = ep.episodeNumber
+                                        lastPlayedSeasonNum = selectedSeasonNum
                                         val startFresh = epSavedPos <= 3_000L
                                         startStreamResolution(
                                             episode = ep,
@@ -1539,7 +1875,8 @@ fun MediaDetailsScreen(
                 confirmButton = {
                     Button(
                         onClick = { errorDialogMessage = null },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE50914))
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE50914)),
+                        modifier = Modifier.tvFocusHighlight(RoundedCornerShape(50))
                     ) { Text("OK", color = Color.White) }
                 }
             )
@@ -1604,7 +1941,7 @@ fun SearchScreen(
                 keyboardController?.hide()
                 onBack()
             },
-            modifier = Modifier.height(36.dp),
+            modifier = Modifier.tvFocusHighlight(RoundedCornerShape(12.dp)).height(36.dp),
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
         ) {
             Text("← Back", color = Color.White, fontSize = 13.sp)
@@ -1649,7 +1986,7 @@ fun SearchScreen(
                 shape = RoundedCornerShape(24.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE50914)),
                 contentPadding = PaddingValues(horizontal = 18.dp),
-                modifier = Modifier.height(52.dp)
+                modifier = Modifier.tvFocusHighlight(RoundedCornerShape(12.dp)).height(52.dp)
             ) {
                 Text("Search", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
             }
@@ -1762,6 +2099,7 @@ fun FilterDropdownPill(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(42.dp)
+                    .tvFocusHighlight(RoundedCornerShape(10.dp), focusedScale = 1.03f)
                     .clip(RoundedCornerShape(10.dp))
                     .background(if (isActive) Color(0xFF2C1A1A) else Color(0xFF1E1E1E))
                     .border(1.dp, if (isActive) Color(0xFFE50914) else Color(0xFF383838), RoundedCornerShape(10.dp))
@@ -1856,7 +2194,7 @@ fun SettingsScreen(
                     keyboardController?.hide()
                     onBack()
                 },
-                modifier = Modifier.height(36.dp),
+                modifier = Modifier.tvFocusHighlight(RoundedCornerShape(12.dp)).height(36.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
             ) {
                 Text("← Done", color = Color.White, fontSize = 13.sp)
@@ -1908,7 +2246,7 @@ fun SettingsScreen(
                             tmdbStatusMessage = "Logged out of TMDB."
                             onAccountChanged()
                         },
-                        modifier = Modifier.height(36.dp)
+                        modifier = Modifier.tvFocusHighlight(RoundedCornerShape(12.dp)).height(36.dp)
                     ) {
                         Text("Log Out of TMDB", color = Color(0xFFFF5252), fontSize = 12.sp)
                     }
@@ -1957,7 +2295,7 @@ fun SettingsScreen(
                         enabled = !isTmdbLoading,
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE50914)),
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
+                        modifier = Modifier.tvFocusHighlight(RoundedCornerShape(12.dp))
                             .fillMaxWidth()
                             .height(44.dp)
                     ) {
@@ -2058,7 +2396,7 @@ fun AniListSettingsCard(onAccountChanged: () -> Unit) {
                         statusMessage = "Logged out of AniList."
                         onAccountChanged()
                     },
-                    modifier = Modifier.height(36.dp)
+                    modifier = Modifier.tvFocusHighlight(RoundedCornerShape(12.dp)).height(36.dp)
                 ) {
                     Text("Log Out of AniList", color = Color.LightGray, fontSize = 12.sp)
                 }
@@ -2067,7 +2405,7 @@ fun AniListSettingsCard(onAccountChanged: () -> Unit) {
                     onClick = { showOAuthModal = true },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF02A9FF)),
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
+                    modifier = Modifier.tvFocusHighlight(RoundedCornerShape(12.dp))
                         .fillMaxWidth()
                         .height(44.dp)
                 ) {
@@ -2085,7 +2423,7 @@ fun AniListSettingsCard(onAccountChanged: () -> Unit) {
                     onClick = { verifyToken(tokenInput) },
                     enabled = !isLoading && tokenInput.isNotBlank(),
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
+                    modifier = Modifier.tvFocusHighlight(RoundedCornerShape(12.dp))
                         .fillMaxWidth()
                         .height(42.dp)
                 ) {
@@ -2120,7 +2458,7 @@ fun AniListSettingsCard(onAccountChanged: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("AniList OAuth Login", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                        TextButton(onClick = { showOAuthModal = false }) {
+                        TextButton(onClick = { showOAuthModal = false }, modifier = Modifier.tvFocusHighlight(RoundedCornerShape(12.dp))) {
                             Text("✕ Close", color = Color.LightGray)
                         }
                     }

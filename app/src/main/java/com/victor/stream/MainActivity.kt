@@ -1,6 +1,7 @@
 package com.victor.stream
 
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -26,6 +27,8 @@ import com.victor.stream.ui.MediaDetailsScreen
 import com.victor.stream.ui.PlayerScreen
 import com.victor.stream.ui.SearchScreen
 import com.victor.stream.ui.SettingsScreen
+import com.victor.stream.ui.RemoteKeyRouter
+import com.victor.stream.ui.TvFocusMemory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
@@ -49,6 +52,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Give the video player first look at remote buttons (seek, play/pause, back...)
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val handler = RemoteKeyRouter.playerHandler
+        if (handler != null && handler(event)) return true
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onResume() {
         super.onResume()
         (ServiceLocator.streamResolver as? WebViewStreamResolver)?.attachHostToActivity(this)
@@ -67,6 +77,8 @@ fun AppNavHost() {
     val catalogRepo = ServiceLocator.catalogRepository
 
     var selectedSection by remember { mutableStateOf("Home") }
+    // Remembers which poster had remote focus so it gets it back after Back
+    val homeFocusMemory = remember { TvFocusMemory() }
     var isLoading by remember { mutableStateOf(true) }
     var syncTriggerCount by remember { mutableIntStateOf(0) }
 
@@ -168,7 +180,8 @@ fun AppNavHost() {
                     }
                 },
                 onMediaClick = { item -> openDetailsForMedia(item) },
-                onContinueClick = { entry -> openDetailsForMedia(entry.media) }
+                onContinueClick = { entry -> openDetailsForMedia(entry.media) },
+                focusMemory = homeFocusMemory
             )
         }
 

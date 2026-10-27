@@ -7,7 +7,10 @@ import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.Color as AndroidColor
+import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
 import android.util.TypedValue
+import android.view.KeyEvent
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -24,6 +27,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -31,10 +35,15 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import java.util.WeakHashMap
+import kotlin.math.abs
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
@@ -71,9 +80,23 @@ private fun Context.findActivity(): Activity? {
     return null
 }
 
-private fun isTvDevice(context: Context): Boolean {
-    val uiModeManager = context.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
-    return uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+private fun formatPlayerTime(ms: Long): String {
+    val totalSec = (ms.coerceAtLeast(0L) / 1000L)
+    val h = totalSec / 3600
+    val m = (totalSec % 3600) / 60
+    val sec = totalSec % 60
+    return if (h > 0) String.format("%d:%02d:%02d", h, m, sec) else String.format("%d:%02d", m, sec)
+}
+
+/** White rounded ring used to show which player button the remote is on. */
+private fun playerFocusRing(context: Context): GradientDrawable {
+    val density = context.resources.displayMetrics.density
+    return GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = 12f * density
+        setColor(0x40FFFFFF)
+        setStroke((3f * density).toInt(), AndroidColor.WHITE)
+    }
 }
 
 @Composable
@@ -129,6 +152,11 @@ fun PlayerScreen(
     }
 
     var controllerVisible by remember { mutableStateOf(true) }
+    // Reference to the ExoPlayer view so remote keys can show/hide its control bar
+    val playerViewHolder = remember { arrayOfNulls<PlayerView>(1) }
+    // Player buttons we've already given a focus ring (and their original backgrounds)
+    val styledViews = remember { WeakHashMap<View, Drawable?>() }
+    val sheetFirstFocus = remember { FocusRequester() }
     var showRightSettingsSheet by remember { mutableStateOf(false) }
     var settingsTab by remember { mutableStateOf("Main") }
     var statusToastLabel by remember { mutableStateOf<String?>(null) }
@@ -415,6 +443,235 @@ fun PlayerScreen(
         }
     }
 
+    // ==========================================
+    // TV REMOTE CONTROL
+    // ==========================================
+    val skipOverlayVisible = playerState.activeSkipSegment != null && !isResolvingOverlay && !showRightSettingsSheet
+    val upNextOverlayVisible = media.isSeries &&
+            nextEpisodeObj != null &&
+            preloadedNextStream != null &&
+            playerState.secondsRemaining in 1..75 &&
+            !isResolvingOverlay &&
+            !showRightSettingsSheet
+
+    fun performSkipSegment() {
+        val seg = playerState.activeSkipSegment ?: return
+        if (seg.label == "Credits" && nextEpisodeObj != null && preloadedNextStream != null) {
+            triggerEpisodeTransition(nextEpisodeObj, preloadedNextStream)
+        } else {
+            playbackController.seekTo(seg.endMs)
+        }
+    }
+
+    fun seekByFromRemote(deltaMs: Long) {
+        val player = playbackController.exoPlayer
+        val duration = player.duration.takeIf { it > 0L } ?: Long.MAX_VALUE
+        val target = (player.currentPosition + deltaMs).coerceIn(0L, duration)
+        playbackController.seekTo(target)
+        val arrow = if (deltaMs >= 0) "⏩ +" else "⏪ -"
+        val total = if (duration == Long.MAX_VALUE) "" else " / ${formatPlayerTime(duration)}"
+        statusToastLabel = "$arrow${abs(deltaMs) / 1000}s   ${formatPlayerTime(target)}$total"
+    }
+
+    fun togglePlayPause() {
+        val player = playbackController.exoPlayer
+        if (player.isPlaying) player.pause() else player.play()
+    }
+
+    fun openSettingsSheet(tab: String) {
+        settingsTab = tab
+        showRightSettingsSheet = true
+    }
+
+    val remoteKeyHandler: (KeyEvent) -> Boolean = handler@{ ev ->
+        val isDown = ev.action == KeyEvent.ACTION_DOWN
+        val isFirstPress = isDown && ev.repeatCount == 0
+        val playerView = playerViewHolder[0]
+        // Holding left/right seeks faster the longer you hold
+        val seekStep = when {
+            ev.repeatCount >= 20 -> 60_000L
+            ev.repeatCount >= 6 -> 30_000L
+            else -> 10_000L
+        }
+
+        // ---- Media buttons work no matter what is on screen ----
+        when (ev.keyCode) {
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_HEADSETHOOK -> {
+                if (isFirstPress) {
+                    togglePlayPause()
+                    playerView?.showController()
+                }
+                return@handler true
+            }
+            KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                if (isFirstPress) playbackController.exoPlayer.play()
+                return@handler true
+            }
+            KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                if (isFirstPress) {
+                    playbackController.exoPlayer.pause()
+                    playerView?.showController()
+                }
+                return@handler true
+            }
+            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
+                if (isDown) seekByFromRemote(seekStep)
+                return@handler true
+            }
+            KeyEvent.KEYCODE_MEDIA_REWIND -> {
+                if (isDown) seekByFromRemote(-seekStep)
+                return@handler true
+            }
+            KeyEvent.KEYCODE_MEDIA_NEXT, KeyEvent.KEYCODE_CHANNEL_UP -> {
+                if (isFirstPress && media.isSeries && nextEpisodeObj != null) {
+                    triggerEpisodeTransition(nextEpisodeObj, preloadedNextStream)
+                }
+                return@handler true
+            }
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS, KeyEvent.KEYCODE_CHANNEL_DOWN -> {
+                if (isFirstPress && media.isSeries && prevEpisodeObj != null) {
+                    triggerEpisodeTransition(prevEpisodeObj, null)
+                }
+                return@handler true
+            }
+            KeyEvent.KEYCODE_MEDIA_STOP -> {
+                if (isFirstPress) onBack()
+                return@handler true
+            }
+            KeyEvent.KEYCODE_CAPTIONS -> {
+                if (isFirstPress) openSettingsSheet("Captions")
+                return@handler true
+            }
+        }
+
+        val isBack = ev.keyCode == KeyEvent.KEYCODE_BACK || ev.keyCode == KeyEvent.KEYCODE_ESCAPE
+
+        // ---- "Connecting servers..." overlay: Back cancels it ----
+        if (isResolvingOverlay) {
+            if (isBack) {
+                if (ev.action == KeyEvent.ACTION_UP) {
+                    activeResolverJob?.cancel()
+                    ServiceLocator.streamResolver.cancelActive()
+                    isResolvingOverlay = false
+                }
+                return@handler true
+            }
+            return@handler false
+        }
+
+        // ---- Settings panel open: arrows move inside it, Back steps out ----
+        if (showRightSettingsSheet) {
+            if (isBack) {
+                if (ev.action == KeyEvent.ACTION_UP) {
+                    if (settingsTab != "Main") settingsTab = "Main" else showRightSettingsSheet = false
+                }
+                return@handler true
+            }
+            return@handler false
+        }
+
+        // ---- Control bar visible: arrows move between buttons, Back hides the bar ----
+        val barVisible = playerView?.isControllerFullyVisible ?: controllerVisible
+        if (barVisible) {
+            if (isBack) {
+                if (ev.action == KeyEvent.ACTION_UP) playerView?.hideController()
+                return@handler true
+            }
+            // Any key keeps the bar on screen a little longer
+            if (isDown) playerView?.showController()
+            return@handler false
+        }
+
+        // ---- Watching with nothing on screen ----
+        when (ev.keyCode) {
+            KeyEvent.KEYCODE_DPAD_LEFT -> {
+                if (isDown) seekByFromRemote(-seekStep)
+                true
+            }
+            KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                if (isDown) seekByFromRemote(seekStep)
+                true
+            }
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                if (isFirstPress) {
+                    when {
+                        skipOverlayVisible -> performSkipSegment()
+                        upNextOverlayVisible && nextEpisodeObj != null ->
+                            triggerEpisodeTransition(nextEpisodeObj, preloadedNextStream)
+                        else -> {
+                            togglePlayPause()
+                            playerView?.showController()
+                        }
+                    }
+                }
+                true
+            }
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_MENU -> {
+                if (isFirstPress) playerView?.showController()
+                true
+            }
+            KeyEvent.KEYCODE_INFO -> {
+                if (isFirstPress) openSettingsSheet("Main")
+                true
+            }
+            else -> false // Back exits the player as normal
+        }
+    }
+
+    val latestRemoteKeyHandler by rememberUpdatedState(remoteKeyHandler)
+    DisposableEffect(Unit) {
+        val handler: (KeyEvent) -> Boolean = { ev -> latestRemoteKeyHandler(ev) }
+        RemoteKeyRouter.playerHandler = handler
+        onDispose {
+            if (RemoteKeyRouter.playerHandler === handler) RemoteKeyRouter.playerHandler = null
+        }
+    }
+
+    // Settings panel: put the remote on its first option whenever it opens / changes page
+    var sheetWasOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(showRightSettingsSheet, settingsTab) {
+        if (showRightSettingsSheet) {
+            sheetWasOpen = true
+            delay(250)
+            runCatching { sheetFirstFocus.requestFocus() }
+        } else if (sheetWasOpen) {
+            sheetWasOpen = false
+            // Panel closed: hand focus back to the player's control bar
+            delay(150)
+            playerViewHolder[0]?.let { pv ->
+                pv.requestFocus()
+                pv.showController()
+            }
+        }
+    }
+
+    // Gives every focusable button in ExoPlayer's control bar a clear white ring + zoom
+    // while the remote is on it, so you can always see which button you're on.
+    fun applyRemoteFocusRings(root: View) {
+        if (root is ViewGroup) {
+            for (i in 0 until root.childCount) applyRemoteFocusRings(root.getChildAt(i))
+        }
+        if (root === playerViewHolder[0] || !root.isFocusable || styledViews.containsKey(root)) return
+        styledViews[root] = root.background
+        val isTimeBar = root is androidx.media3.ui.TimeBar
+        val previousListener = root.onFocusChangeListener
+        root.setOnFocusChangeListener { v, hasFocus ->
+            if (hasFocus) {
+                v.background = playerFocusRing(v.context)
+                if (!isTimeBar) {
+                    v.animate().scaleX(1.18f).scaleY(1.18f).setDuration(120).start()
+                }
+            } else {
+                v.background = styledViews[v]
+                v.animate().scaleX(1f).scaleY(1f).setDuration(120).start()
+            }
+            previousListener?.onFocusChange(v, hasFocus)
+        }
+        if (root.hasFocus()) {
+            root.background = playerFocusRing(root.context)
+        }
+    }
+
     fun bindPlayerViewButtons(playerView: PlayerView) {
         playerView.findViewById<View>(androidx.media3.ui.R.id.exo_settings)?.setOnClickListener {
             settingsTab = "Main"
@@ -479,6 +736,8 @@ fun PlayerScreen(
             )
             parentGroup.addView(zoomBtn, subIndex, lp)
         }
+
+        applyRemoteFocusRings(playerView)
     }
 
     Box(
@@ -489,6 +748,7 @@ fun PlayerScreen(
         AndroidView(
             factory = { ctx ->
                 PlayerView(ctx).apply {
+                    playerViewHolder[0] = this
                     player = playbackController.exoPlayer
                     useController = true
                     resizeMode = playerState.resizeMode
@@ -550,6 +810,7 @@ fun PlayerScreen(
                 IconButton(
                     onClick = onBack,
                     modifier = Modifier
+                        .tvFocusHighlight(RoundedCornerShape(20.dp), focusedScale = 1.12f)
                         .size(40.dp)
                         .clip(RoundedCornerShape(20.dp))
                         .background(Color(0x66000000))
@@ -589,20 +850,15 @@ fun PlayerScreen(
             val seg = playerState.activeSkipSegment
             if (seg != null) {
                 Button(
-                    onClick = {
-                        if (seg.label == "Credits" && nextEpisodeObj != null && preloadedNextStream != null) {
-                            triggerEpisodeTransition(nextEpisodeObj, preloadedNextStream)
-                        } else {
-                            playbackController.seekTo(seg.endMs)
-                        }
-                    },
+                    onClick = { performSkipSegment() },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xE6222222)),
                     border = BorderStroke(1.5.dp, Color.White),
                     shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier.tvFocusHighlight(RoundedCornerShape(8.dp))
                 ) {
                     Text(
-                        text = "⏭ Skip ${seg.label}",
+                        text = if (isTv) "⏭ Skip ${seg.label}  (press OK)" else "⏭ Skip ${seg.label}",
                         color = Color.White,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold
@@ -636,7 +892,8 @@ fun PlayerScreen(
                 ) {
                     Column {
                         Text(
-                            text = "Up Next in ${playerState.secondsRemaining}s (Buffered)",
+                            text = if (isTv) "Up Next in ${playerState.secondsRemaining}s · press OK"
+                            else "Up Next in ${playerState.secondsRemaining}s (Buffered)",
                             color = Color.White,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
@@ -659,7 +916,9 @@ fun PlayerScreen(
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE50914)),
                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                        modifier = Modifier.height(34.dp)
+                        modifier = Modifier
+                            .tvFocusHighlight(RoundedCornerShape(50))
+                            .height(34.dp)
                     ) {
                         Text("⏭ Next Episode", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
@@ -677,10 +936,8 @@ fun PlayerScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color(0x55000000))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { showRightSettingsSheet = false }
+                    // Tap outside closes the panel (pointerInput so the remote can't land on it)
+                    .pointerInput(Unit) { detectTapGestures { showRightSettingsSheet = false } }
             )
         }
 
@@ -697,10 +954,7 @@ fun PlayerScreen(
                     .width(310.dp)
                     .fillMaxHeight()
                     .background(Color(0xF2161616))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) {}
+                    .pointerInput(Unit) { detectTapGestures { } }
                     .padding(horizontal = 20.dp, vertical = 18.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -720,8 +974,10 @@ fun PlayerScreen(
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier
+                                    .tvFocusHighlight(RoundedCornerShape(8.dp))
+                                    .clip(RoundedCornerShape(8.dp))
                                     .clickable { settingsTab = "Main" }
-                                    .padding(end = 4.dp)
+                                    .padding(horizontal = 6.dp)
                             )
                         }
                         Text(
@@ -743,6 +999,7 @@ fun PlayerScreen(
                         color = Color.White,
                         fontSize = 20.sp,
                         modifier = Modifier
+                            .tvFocusHighlight(RoundedCornerShape(16.dp))
                             .clip(RoundedCornerShape(16.dp))
                             .clickable { showRightSettingsSheet = false }
                             .padding(6.dp)
@@ -759,6 +1016,7 @@ fun PlayerScreen(
                         ) {
                             item {
                                 RightDrawerMainItem(
+                                    modifier = Modifier.focusRequester(sheetFirstFocus),
                                     iconText = "HD",
                                     isBoxedIcon = true,
                                     title = "Quality",
@@ -824,8 +1082,9 @@ fun PlayerScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxSize()
                         ) {
-                            itemsIndexed(VIDEO_QUALITY_OPTIONS) { _, qOpt ->
+                            itemsIndexed(VIDEO_QUALITY_OPTIONS) { qIdx, qOpt ->
                                 RightDrawerSubOption(
+                                    modifier = if (qIdx == 0) Modifier.focusRequester(sheetFirstFocus) else Modifier,
                                     label = qOpt.label,
                                     isSelected = playerState.selectedQuality.label == qOpt.label
                                 ) {
@@ -842,8 +1101,9 @@ fun PlayerScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxSize()
                         ) {
-                            itemsIndexed(audioModes) { _, mode ->
+                            itemsIndexed(audioModes) { aIdx, mode ->
                                 RightDrawerSubOption(
+                                    modifier = if (aIdx == 0) Modifier.focusRequester(sheetFirstFocus) else Modifier,
                                     label = mode,
                                     isSelected = playerState.selectedAudioMode == mode
                                 ) {
@@ -861,6 +1121,7 @@ fun PlayerScreen(
                         ) {
                             item {
                                 RightDrawerSubOption(
+                                    modifier = Modifier.focusRequester(sheetFirstFocus),
                                     label = "Off",
                                     isSelected = playerState.selectedSubtitleIndex == -1
                                 ) {
@@ -904,8 +1165,9 @@ fun PlayerScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxSize()
                         ) {
-                            itemsIndexed(speeds) { _, (spdVal, spdText) ->
+                            itemsIndexed(speeds) { sIdx, (spdVal, spdText) ->
                                 RightDrawerSubOption(
+                                    modifier = if (sIdx == 0) Modifier.focusRequester(sheetFirstFocus) else Modifier,
                                     label = spdText,
                                     isSelected = playerState.playbackSpeed == spdVal
                                 ) {
@@ -921,7 +1183,7 @@ fun PlayerScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxSize()
                         ) {
-                            itemsIndexed(candidateServersList) { _, candidate: ServerCandidate ->
+                            itemsIndexed(candidateServersList) { svIdx, candidate: ServerCandidate ->
                                 val isCurrent = playerState.activeProviderId == candidate.providerId
                                 val cachedStream = ServiceLocator.resolveStreamUseCase.getCachedStream(
                                     media.id,
@@ -934,6 +1196,7 @@ fun PlayerScreen(
                                     candidate.label
                                 }
                                 RightDrawerSubOption(
+                                    modifier = if (svIdx == 0) Modifier.focusRequester(sheetFirstFocus) else Modifier,
                                     label = displayLabel,
                                     isSelected = isCurrent
                                 ) {
@@ -1004,14 +1267,16 @@ fun RightDrawerMainItem(
     isBoxedIcon: Boolean,
     title: String,
     subtitle: String,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
+            .tvFocusHighlight(RoundedCornerShape(8.dp), focusedScale = 1.03f)
             .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
-            .padding(vertical = 4.dp),
+            .padding(horizontal = 6.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -1046,11 +1311,13 @@ fun RightDrawerMainItem(
 fun RightDrawerSubOption(
     label: String,
     isSelected: Boolean,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
+            .tvFocusHighlight(RoundedCornerShape(8.dp), focusedScale = 1.03f)
             .clip(RoundedCornerShape(8.dp))
             .background(if (isSelected) Color(0xFF2B2B2B) else Color.Transparent)
             .clickable(onClick = onClick)
