@@ -28,10 +28,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Animation
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
@@ -53,6 +62,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -218,8 +228,20 @@ fun ContinueWatchingRow(
                         fontSize = 12.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 4.dp, start = 2.dp, end = 2.dp, bottom = 2.dp)
+                        modifier = Modifier.padding(top = 4.dp, start = 2.dp, end = 2.dp, bottom = 0.dp)
                     )
+                    val minsLeft = if (entry.durationMs > 0L) {
+                        ((entry.durationMs - entry.positionMs).coerceAtLeast(0L) / 60000L).toInt()
+                    } else -1
+                    if (minsLeft >= 0) {
+                        Text(
+                            text = if (minsLeft == 0) "Almost done" else "$minsLeft min left",
+                            color = Color.Gray,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            modifier = Modifier.padding(start = 2.dp, bottom = 2.dp)
+                        )
+                    }
                 }
             }
         }
@@ -458,6 +480,176 @@ fun Modifier.tvRememberedFocus(
                 }
             }
         }
+}
+
+// ==========================================
+// SHIMMER (loading placeholders) + FEATURED HERO
+// ==========================================
+
+/** An animated left-to-right shimmer, used for skeleton loading placeholders. */
+fun Modifier.shimmer(shape: Shape = RoundedCornerShape(8.dp)): Modifier = composed {
+    val transition = rememberInfiniteTransition(label = "shimmer")
+    val x by transition.animateFloat(
+        initialValue = -600f,
+        targetValue = 900f,
+        animationSpec = infiniteRepeatable(tween(1200, easing = FastOutSlowInEasing), RepeatMode.Restart),
+        label = "shimmerX"
+    )
+    val brush = Brush.linearGradient(
+        colors = listOf(Color(0xFF1C1C1C), Color(0xFF2E2E2E), Color(0xFF1C1C1C)),
+        start = Offset(x, 0f),
+        end = Offset(x + 500f, 0f)
+    )
+    this.clip(shape).background(brush)
+}
+
+@Composable
+private fun ShimmerRow(posterCount: Int = 6) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(
+            modifier = Modifier
+                .padding(horizontal = 14.dp)
+                .width(160.dp)
+                .height(16.dp)
+                .shimmer(RoundedCornerShape(4.dp))
+        )
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            userScrollEnabled = false
+        ) {
+            items(posterCount) {
+                Column(modifier = Modifier.width(115.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(165.dp)
+                            .shimmer(RoundedCornerShape(8.dp))
+                    )
+                    Box(
+                        modifier = Modifier
+                            .padding(top = 6.dp)
+                            .fillMaxWidth(0.8f)
+                            .height(12.dp)
+                            .shimmer(RoundedCornerShape(4.dp))
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun HomeLoadingSkeleton() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
+    ) {
+        // A big hero placeholder, then a couple of poster rows
+        Box(
+            modifier = Modifier
+                .padding(horizontal = 14.dp)
+                .fillMaxWidth()
+                .height(180.dp)
+                .shimmer(RoundedCornerShape(14.dp))
+        )
+        ShimmerRow()
+        ShimmerRow()
+    }
+}
+
+/** Big backdrop "hero" card at the top of Home for a featured title. */
+@Composable
+fun FeaturedHero(
+    item: MediaItemModel,
+    onPlay: (MediaItemModel) -> Unit,
+    isFirstRow: Boolean = false,
+    focusMemory: TvFocusMemory? = null
+) {
+    val heroImage = item.backdropUrl.ifBlank { item.posterUrl }
+    Box(
+        modifier = Modifier
+            .padding(horizontal = 14.dp)
+            .fillMaxWidth()
+            .height(200.dp)
+            .then(
+                if (focusMemory != null) Modifier.tvRememberedFocus("hero#${item.id}", 0, isFirstRow, focusMemory)
+                else Modifier
+            )
+            .tvFocusHighlight(RoundedCornerShape(16.dp), focusedScale = 1.02f)
+            .clip(RoundedCornerShape(16.dp))
+            .clickable {
+                if (focusMemory != null) focusMemory.pendingKey = "hero#${item.id}"
+                onPlay(item)
+            }
+    ) {
+        AsyncImage(
+            model = heroImage,
+            contentDescription = item.title,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.DarkGray)
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color(0x33000000), Color(0xEE0D0D0D)),
+                        startY = 60f
+                    )
+                )
+        )
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = item.badgeLabel + "  •  ★ " + String.format("%.1f", item.rating),
+                color = Color(0xFFE50914),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+            Text(
+                text = item.title,
+                color = Color.White,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.ExtraBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = item.overview,
+                color = Color.LightGray,
+                fontSize = 12.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(0.9f)
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(top = 4.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.PlayArrow,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(Color(0xFFE50914))
+                        .padding(3.dp)
+                )
+                Text("View details", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
 }
 
 // ==========================================
@@ -768,12 +960,30 @@ fun HomeScreenWithSidebar(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.align(Alignment.Center)
                 )
+                // Search is a primary action, so keep it one tap away on the main screen too
+                IconButton(
+                    onClick = {
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
+                        focusMemory.pendingKey = focusMemory.lastFocusedKey ?: TvFocusMemory.FIRST_ITEM
+                        onOpenSearchScreen()
+                    },
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .tvFocusHighlight(RoundedCornerShape(50), focusedScale = 1.12f)
+                        .size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Search,
+                        contentDescription = "Search",
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
             }
 
             if (isLoading) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = Color(0xFFE50914))
-                }
+                HomeLoadingSkeleton()
             } else {
                 when (selectedSection) {
                     "WatchLater" -> {
@@ -833,6 +1043,16 @@ fun HomeScreenWithSidebar(
                         ) {
                             when (selectedSection) {
                                 "Home" -> {
+                                    val heroItem = trendingAll.firstOrNull { it.backdropUrl.isNotBlank() }
+                                        ?: trendingAll.firstOrNull()
+                                    if (heroItem != null) {
+                                        item {
+                                            FeaturedHero(
+                                                item = heroItem,
+                                                onPlay = onMediaClick
+                                            )
+                                        }
+                                    }
                                     val homeFirst = when {
                                         continueList.isNotEmpty() -> "continue"
                                         watchLaterList.isNotEmpty() -> "watchLater"
