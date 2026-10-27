@@ -112,20 +112,6 @@ class ProviderRegistry {
             baseReliability = 0.88f
         ),
         ProviderDescriptor(
-            id = "embed_su",
-            label = "Embed.su (Filemoon / Viper)",
-            supportedKinds = setOf(MediaKind.MOVIE, MediaKind.TV),
-            idType = IdType.TMDB,
-            movieUrlTemplate = "https://embed.su/embed/movie/{id}?autoplay=true",
-            seriesUrlTemplate = "https://embed.su/embed/tv/{id}/{s}/{e}?autoplay=true",
-            headerProfile = HeaderProfile("https://embed.su/", "https://embed.su"),
-            requiresPopup = true,
-            trust = ProviderTrust.SETTLE,
-            timeoutMs = 8_500L,
-            hedgeDelayMs = 3_200L,
-            baseReliability = 0.86f
-        ),
-        ProviderDescriptor(
             id = "vidora",
             label = "Vidora (Fast Direct)",
             supportedKinds = setOf(MediaKind.MOVIE, MediaKind.TV),

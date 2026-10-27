@@ -124,6 +124,10 @@ object StreamUrlClassifier {
         val lower = url.lowercase()
         if (!lower.startsWith("http") || isBlockedDomain(lower) || isSubtitleUrl(lower)) return false
         if (lower.contains("url=undefined") || lower.endsWith("undefined")) return false
+        // Reject DASH manifests: VidLink's .mpd streams consistently fail playback with
+        // ERROR_CODE_IO_BAD_HTTP_STATUS. Skipping them makes the resolver keep looking for
+        // a playable HLS (.m3u8) / MP4 stream instead of handing the player a dead manifest.
+        if (lower.contains(".mpd") || lower.contains("/dash/")) return false
         if (verifiedByContent) return true
         val pathPart = lower.substringBefore("?")
         if (nonVideoExtensions.any { pathPart.endsWith(it) }) return false
@@ -131,17 +135,15 @@ object StreamUrlClassifier {
 
         val mime = mimeType?.lowercase().orEmpty()
         if (mime.contains("mpegurl") || mime.contains("application/vnd.apple.mpegurl") ||
-            mime.contains("dash+xml") || mime.contains("video/mp4")
+            mime.contains("video/mp4")
         ) return true
 
         return lower.contains(".m3u8") ||
-                lower.contains(".mpd") ||
                 pathPart.endsWith(".mp4") ||
                 lower.contains(".mp4?") ||
                 lower.contains("get_video?id=") ||
                 lower.contains("/hls/") ||
                 lower.contains("/hls2/") ||
-                lower.contains("/dash/") ||
                 lower.contains("master.txt") ||
                 lower.contains("playlist.m3u8") ||
                 lower.contains("index.m3u8") ||
