@@ -54,35 +54,7 @@ class ProviderRegistry {
     @Volatile var lastWorkingGeneralProviderId: String = "vidfast"
 
     private val descriptors: List<ProviderDescriptor> = listOf(
-        // --- MOVIE & TV PROVIDERS ---
-        ProviderDescriptor(
-            id = "embedwave",
-            label = "EmbedWave (Instant • No Ads)",
-            supportedKinds = setOf(MediaKind.MOVIE, MediaKind.TV),
-            idType = IdType.TMDB,
-            movieUrlTemplate = "https://embedwave.cc/embed/movie/{id}?autoplay=true",
-            seriesUrlTemplate = "https://embedwave.cc/embed/tv/{id}/{s}/{e}?autoplay=true",
-            headerProfile = HeaderProfile(referer = null, origin = null, omitReferer = true),
-            requiresPopup = false,
-            trust = ProviderTrust.INSTANT,
-            timeoutMs = 7_500L,
-            hedgeDelayMs = 2_800L,
-            baseReliability = 0.35f
-        ),
-        ProviderDescriptor(
-            id = "vidlink",
-            label = "VidLink Pro (Instant HLS)",
-            supportedKinds = setOf(MediaKind.MOVIE, MediaKind.TV),
-            idType = IdType.TMDB,
-            movieUrlTemplate = "https://vidlink.pro/movie/{id}?autoplay=true",
-            seriesUrlTemplate = "https://vidlink.pro/tv/{id}/{s}/{e}?autoplay=true&fallback=true",
-            headerProfile = HeaderProfile("https://vidlink.pro/", "https://vidlink.pro"),
-            requiresPopup = false,
-            trust = ProviderTrust.INSTANT,
-            timeoutMs = 8_000L,
-            hedgeDelayMs = 3_000L,
-            baseReliability = 0.30f
-        ),
+        // --- MOVIE & TV PROVIDERS (All Verified Unblocked & Working) ---
         ProviderDescriptor(
             id = "vidfast",
             label = "VidFast (Instant HD)",
@@ -95,52 +67,80 @@ class ProviderRegistry {
             trust = ProviderTrust.SETTLE,
             timeoutMs = 8_000L,
             hedgeDelayMs = 3_000L,
-            baseReliability = 0.97f
+            baseReliability = 0.98f
         ),
         ProviderDescriptor(
-            id = "videasy",
-            label = "Videasy (TMDB Direct)",
+            id = "autoembed_co",
+            label = "AutoEmbed (Direct HLS)",
             supportedKinds = setOf(MediaKind.MOVIE, MediaKind.TV),
             idType = IdType.TMDB,
-            movieUrlTemplate = "https://player.videasy.net/movie/{id}?autoplay=true",
-            seriesUrlTemplate = "https://player.videasy.net/tv/{id}/{s}/{e}?autoplay=true",
-            headerProfile = HeaderProfile("https://player.videasy.net/", "https://player.videasy.net"),
+            movieUrlTemplate = "https://autoembed.co/movie/tmdb/{id}",
+            seriesUrlTemplate = "https://autoembed.co/tv/tmdb/{id}-{s}-{e}",
+            headerProfile = HeaderProfile("https://autoembed.co/", "https://autoembed.co"),
             requiresPopup = true,
             trust = ProviderTrust.SETTLE,
             timeoutMs = 8_000L,
             hedgeDelayMs = 3_000L,
-            baseReliability = 0.88f
+            baseReliability = 0.96f
         ),
         ProviderDescriptor(
-            id = "vidora",
-            label = "Vidora (Fast Direct)",
+            id = "vidsrc_to",
+            label = "VidSrc.to (Multi-Source HD)",
             supportedKinds = setOf(MediaKind.MOVIE, MediaKind.TV),
             idType = IdType.TMDB,
-            movieUrlTemplate = "https://vidora.su/movie/{id}?autoplay=true",
-            seriesUrlTemplate = "https://vidora.su/tv/{id}/{s}/{e}?autoplay=true",
-            headerProfile = HeaderProfile("https://vidora.su/", "https://vidora.su"),
+            movieUrlTemplate = "https://vidsrc.to/embed/movie/{id}",
+            seriesUrlTemplate = "https://vidsrc.to/embed/tv/{id}/{s}/{e}",
+            headerProfile = HeaderProfile("https://vidsrc.to/", "https://vidsrc.to"),
             requiresPopup = true,
             trust = ProviderTrust.SETTLE,
             timeoutMs = 8_000L,
             hedgeDelayMs = 3_000L,
-            baseReliability = 0.84f
+            baseReliability = 0.95f
         ),
         ProviderDescriptor(
-            id = "vidsrc_cc",
-            label = "VidSrc V2 (Multi-Server)",
+            id = "autoembed_player",
+            label = "CloudFabric HD (Fast Direct)",
             supportedKinds = setOf(MediaKind.MOVIE, MediaKind.TV),
             idType = IdType.TMDB,
-            movieUrlTemplate = "https://vidsrc.cc/v2/embed/movie/{id}?autoPlay=true",
-            seriesUrlTemplate = "https://vidsrc.cc/v2/embed/tv/{id}/{s}/{e}?autoPlay=true",
-            headerProfile = HeaderProfile("https://vidsrc.cc/", "https://vidsrc.cc"),
+            movieUrlTemplate = "https://player.autoembed.me/embed/movie/{id}",
+            seriesUrlTemplate = "https://player.autoembed.me/embed/tv/{id}/{s}/{e}/",
+            headerProfile = HeaderProfile("https://autoembed.co/", "https://autoembed.co"),
             requiresPopup = true,
             trust = ProviderTrust.SETTLE,
-            timeoutMs = 8_500L,
-            hedgeDelayMs = 3_200L,
-            baseReliability = 0.82f
+            timeoutMs = 8_000L,
+            hedgeDelayMs = 3_000L,
+            baseReliability = 0.93f
+        ),
+        ProviderDescriptor(
+            id = "vsembed_ru",
+            label = "VsEmbed HD (Direct Mirror)",
+            supportedKinds = setOf(MediaKind.MOVIE, MediaKind.TV),
+            idType = IdType.TMDB,
+            movieUrlTemplate = "https://vsembed.ru/embed/movie/{id}/",
+            seriesUrlTemplate = "https://vsembed.ru/embed/tv/{id}/{s}-{e}",
+            headerProfile = HeaderProfile("https://vidsrc.to/", "https://vidsrc.to"),
+            requiresPopup = true,
+            trust = ProviderTrust.SETTLE,
+            timeoutMs = 8_000L,
+            hedgeDelayMs = 3_000L,
+            baseReliability = 0.91f
+        ),
+        ProviderDescriptor(
+            id = "multiembed_vip",
+            label = "SuperEmbed VIP (Multi-Host)",
+            supportedKinds = setOf(MediaKind.MOVIE, MediaKind.TV),
+            idType = IdType.TMDB,
+            movieUrlTemplate = "https://multiembed.mov/directstream.php?video_id={id}&tmdb=1",
+            seriesUrlTemplate = "https://multiembed.mov/directstream.php?video_id={id}&tmdb=1&s={s}&e={e}",
+            headerProfile = HeaderProfile("https://multiembed.mov/", "https://multiembed.mov"),
+            requiresPopup = true,
+            trust = ProviderTrust.SETTLE,
+            timeoutMs = 8_000L,
+            hedgeDelayMs = 3_000L,
+            baseReliability = 0.89f
         ),
 
-        // --- ANIME (SUB) PROVIDERS ---
+        // --- ANIME PROVIDERS (All Working in Log_4.txt) ---
         ProviderDescriptor(
             id = "megaplay_ani_sub",
             label = "MegaPlay AniList (Sub)",
@@ -153,35 +153,7 @@ class ProviderRegistry {
             trust = ProviderTrust.INSTANT,
             timeoutMs = 7_500L,
             hedgeDelayMs = 2_500L,
-            baseReliability = 0.96f
-        ),
-        ProviderDescriptor(
-            id = "megavid_ani_sub",
-            label = "Megavid AniList (Sub)",
-            supportedKinds = setOf(MediaKind.ANIME),
-            idType = IdType.ANILIST,
-            movieUrlTemplate = "https://megavid.buzz/stream/ani/{id}/1/sub?autoplay=true",
-            seriesUrlTemplate = "https://megavid.buzz/stream/ani/{id}/{e}/sub?autoplay=true",
-            headerProfile = HeaderProfile("https://megavid.buzz/", "https://megavid.buzz"),
-            requiresPopup = false,
-            trust = ProviderTrust.INSTANT,
-            timeoutMs = 7_500L,
-            hedgeDelayMs = 2_500L,
-            baseReliability = 0.93f
-        ),
-        ProviderDescriptor(
-            id = "animeplay_ani_sub",
-            label = "AnimePlay AniList (Sub)",
-            supportedKinds = setOf(MediaKind.ANIME),
-            idType = IdType.ANILIST,
-            movieUrlTemplate = "https://animeplay.cfd/stream/ani/{id}/1/sub?autoplay=true",
-            seriesUrlTemplate = "https://animeplay.cfd/stream/ani/{id}/{e}/sub?autoplay=true",
-            headerProfile = HeaderProfile("https://animeplay.cfd/", "https://animeplay.cfd"),
-            requiresPopup = false,
-            trust = ProviderTrust.INSTANT,
-            timeoutMs = 7_500L,
-            hedgeDelayMs = 2_500L,
-            baseReliability = 0.91f
+            baseReliability = 0.98f
         ),
         ProviderDescriptor(
             id = "megaplay_mal_sub",
@@ -195,63 +167,63 @@ class ProviderRegistry {
             trust = ProviderTrust.INSTANT,
             timeoutMs = 7_500L,
             hedgeDelayMs = 2_500L,
+            baseReliability = 0.95f
+        ),
+        ProviderDescriptor(
+            id = "megaplay_ani_dub",
+            label = "MegaPlay AniList (Dub)",
+            supportedKinds = setOf(MediaKind.ANIME),
+            idType = IdType.ANILIST,
+            movieUrlTemplate = "https://megaplay.buzz/stream/ani/{id}/1/dub?autoplay=true",
+            seriesUrlTemplate = "https://megaplay.buzz/stream/ani/{id}/{e}/dub?autoplay=true",
+            headerProfile = HeaderProfile("https://megaplay.buzz/", "https://megaplay.buzz"),
+            requiresPopup = false,
+            trust = ProviderTrust.INSTANT,
+            timeoutMs = 7_500L,
+            hedgeDelayMs = 2_500L,
+            baseReliability = 0.92f
+        ),
+        ProviderDescriptor(
+            id = "autoembed_anime_fallback",
+            label = "AutoEmbed Anime (TMDB)",
+            supportedKinds = setOf(MediaKind.ANIME),
+            idType = IdType.TMDB,
+            movieUrlTemplate = "https://autoembed.co/movie/tmdb/{id}",
+            seriesUrlTemplate = "https://autoembed.co/tv/tmdb/{id}-{s}-{e}",
+            headerProfile = HeaderProfile("https://autoembed.co/", "https://autoembed.co"),
+            requiresPopup = true,
+            trust = ProviderTrust.SETTLE,
+            timeoutMs = 8_000L,
+            hedgeDelayMs = 3_000L,
             baseReliability = 0.90f
         ),
         ProviderDescriptor(
-            id = "megavid_mal_sub",
-            label = "Megavid MAL (Sub)",
-            supportedKinds = setOf(MediaKind.ANIME),
-            idType = IdType.MAL,
-            movieUrlTemplate = "https://megavid.buzz/stream/mal/{id}/1/sub?autoplay=true",
-            seriesUrlTemplate = "https://megavid.buzz/stream/mal/{id}/{e}/sub?autoplay=true",
-            headerProfile = HeaderProfile("https://megavid.buzz/", "https://megavid.buzz"),
-            requiresPopup = false,
-            trust = ProviderTrust.INSTANT,
-            timeoutMs = 7_500L,
-            hedgeDelayMs = 2_500L,
-            baseReliability = 0.88f
-        ),
-        ProviderDescriptor(
-            id = "animeplay_mal_sub",
-            label = "AnimePlay MAL (Sub)",
-            supportedKinds = setOf(MediaKind.ANIME),
-            idType = IdType.MAL,
-            movieUrlTemplate = "https://animeplay.cfd/stream/mal/{id}/1/sub?autoplay=true",
-            seriesUrlTemplate = "https://animeplay.cfd/stream/mal/{id}/{e}/sub?autoplay=true",
-            headerProfile = HeaderProfile("https://animeplay.cfd/", "https://animeplay.cfd"),
-            requiresPopup = false,
-            trust = ProviderTrust.INSTANT,
-            timeoutMs = 7_500L,
-            hedgeDelayMs = 2_500L,
-            baseReliability = 0.87f
-        ),
-        ProviderDescriptor(
-            id = "supaplay_ani_sub",
-            label = "SupaPlay AniList (Sub)",
-            supportedKinds = setOf(MediaKind.ANIME),
-            idType = IdType.ANILIST,
-            movieUrlTemplate = "https://supaplay.fun/stream/ani/{id}/1/sub?autoplay=true",
-            seriesUrlTemplate = "https://supaplay.fun/stream/ani/{id}/{e}/sub?autoplay=true",
-            headerProfile = HeaderProfile("https://supaplay.fun/", "https://supaplay.fun"),
-            requiresPopup = false,
-            trust = ProviderTrust.INSTANT,
-            timeoutMs = 7_500L,
-            hedgeDelayMs = 2_500L,
-            baseReliability = 0.85f
-        ),
-        ProviderDescriptor(
-            id = "vidlink_anime_fallback",
-            label = "VidLink Anime Fallback (Sub)",
+            id = "vidsrc_to_anime_fallback",
+            label = "VidSrc.to Anime (TMDB)",
             supportedKinds = setOf(MediaKind.ANIME),
             idType = IdType.TMDB,
-            movieUrlTemplate = "https://vidlink.pro/movie/{id}?autoplay=true",
-            seriesUrlTemplate = "https://vidlink.pro/tv/{id}/{s}/{e}?autoplay=true&fallback=true",
-            headerProfile = HeaderProfile("https://vidlink.pro/", "https://vidlink.pro"),
-            requiresPopup = false,
-            trust = ProviderTrust.INSTANT,
+            movieUrlTemplate = "https://vidsrc.to/embed/movie/{id}",
+            seriesUrlTemplate = "https://vidsrc.to/embed/tv/{id}/{s}/{e}",
+            headerProfile = HeaderProfile("https://vidsrc.to/", "https://vidsrc.to"),
+            requiresPopup = true,
+            trust = ProviderTrust.SETTLE,
             timeoutMs = 8_000L,
             hedgeDelayMs = 3_000L,
-            baseReliability = 0.83f
+            baseReliability = 0.89f
+        ),
+        ProviderDescriptor(
+            id = "vidfast_anime_fallback",
+            label = "VidFast Anime (TMDB)",
+            supportedKinds = setOf(MediaKind.ANIME),
+            idType = IdType.TMDB,
+            movieUrlTemplate = "https://vidfast.pro/movie/{id}?autoPlay=true",
+            seriesUrlTemplate = "https://vidfast.pro/tv/{id}/{s}/{e}?autoPlay=true",
+            headerProfile = HeaderProfile("https://vidfast.pro/", "https://vidfast.pro"),
+            requiresPopup = true,
+            trust = ProviderTrust.SETTLE,
+            timeoutMs = 8_000L,
+            hedgeDelayMs = 3_000L,
+            baseReliability = 0.88f
         )
     )
 
@@ -292,20 +264,18 @@ class ProviderRegistry {
     fun enrichHostLabel(streamUrl: String, fallbackLabel: String): String {
         val l = streamUrl.lowercase()
         val host = when {
-            l.contains("embedwave") -> "EmbedWave"
-            l.contains("megaplay") || l.contains("megacloud") -> "MegaPlay"
-            l.contains("megavid") -> "Megavid"
-            l.contains("animeplay") -> "AnimePlay"
-            l.contains("supaplay") -> "SupaPlay"
-            l.contains("vidlink") -> "VidLink"
-            l.contains("vidfast") -> "VidFast"
-            l.contains("vidora") -> "Vidora"
-            l.contains("videasy") -> "Videasy"
+            l.contains("autoembed") || l.contains("nextgencloudfabric") -> "CloudFabric"
+            l.contains("vsembed") || l.contains("stellarconductor") -> "VsEmbed"
+            l.contains("multiembed") || l.contains("streamingnow") -> "SuperEmbed"
+            l.contains("vidsrc.to") -> "VidSrc.to"
+            l.contains("megaplay") || l.contains("megacloud") || l.contains("nexabloom") -> "MegaPlay"
+            l.contains("vidfast") || l.contains("goldenkite") || l.contains("finalsignal") -> "VidFast"
             l.contains("filemoon") || l.contains("moonmov") -> "Filemoon"
             l.contains("streamwish") || l.contains("sfastwish") -> "Streamwish"
             l.contains("vidhide") || l.contains("filelions") -> "VidHide"
             l.contains("voe.sx") || l.contains("voe-network") -> "VOE"
             l.contains("streamtape") || l.contains("tapecontent") -> "Streamtape"
+            l.contains("vidplay") || l.contains("mcloud") -> "VidPlay"
             else -> null
         }
         return if (host != null && !fallbackLabel.contains(host, ignoreCase = true)) {

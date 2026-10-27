@@ -245,9 +245,10 @@ private val ipv4Dns = object : Dns {
 
 private val sharedOkHttp: OkHttpClient = OkHttpClient.Builder()
     .dns(ipv4Dns)
-    .connectTimeout(6, TimeUnit.SECONDS)
-    .readTimeout(6, TimeUnit.SECONDS)
-    .writeTimeout(6, TimeUnit.SECONDS)
+    .retryOnConnectionFailure(true)
+    .connectTimeout(12, TimeUnit.SECONDS)
+    .readTimeout(12, TimeUnit.SECONDS)
+    .writeTimeout(12, TimeUnit.SECONDS)
     .build()
 
 object NetworkApis {
@@ -500,6 +501,7 @@ class CatalogRepository(
     private val idBridge: IdBridge
 ) {
     private val mediaMemoryCache = ConcurrentHashMap<Int, MediaItemModel>()
+    private val seasonEpisodesMemoryCache = ConcurrentHashMap<String, List<EpisodeRef>>()
 
     private val fallbackSampleList = listOf(
         MediaItemModel(
@@ -743,6 +745,9 @@ class CatalogRepository(
     }
 
     suspend fun fetchTvDetailsAndSeasons(media: MediaItemModel): MediaItemModel = withContext(Dispatchers.IO) {
+        if (media.seasons.isNotEmpty()) return@withContext media
+        mediaMemoryCache[media.id]?.takeIf { it.seasons.isNotEmpty() }?.let { return@withContext it }
+
         val apiKey = BuildConfig.TMDB_API_KEY
         val cleanTmdbId = media.tmdbId ?: (if (media.id >= 100_000_000) media.id - 100_000_000 else media.id)
         if (!media.isSeries || apiKey.isBlank() || cleanTmdbId <= 0) return@withContext media
@@ -774,13 +779,16 @@ class CatalogRepository(
     }
 
     suspend fun fetchSeasonEpisodes(media: MediaItemModel, seasonNumber: Int): List<EpisodeRef> = withContext(Dispatchers.IO) {
+        val cacheKey = "${media.id}_$seasonNumber"
+        seasonEpisodesMemoryCache[cacheKey]?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
+
         val apiKey = BuildConfig.TMDB_API_KEY
         val cleanTmdbId = media.tmdbId ?: (if (media.id >= 100_000_000) media.id - 100_000_000 else media.id)
         if (apiKey.isNotBlank() && cleanTmdbId > 0) {
             try {
                 val res = NetworkApis.tmdb.getSeasonEpisodes(cleanTmdbId, seasonNumber, apiKey)
                 if (res.episodes.isNotEmpty()) {
-                    return@withContext res.episodes.map { ep ->
+                    val mapped = res.episodes.map { ep ->
                         val still = if (ep.stillPath?.startsWith("http") == true) {
                             ep.stillPath
                         } else if (!ep.stillPath.isNullOrBlank()) {
@@ -796,6 +804,8 @@ class CatalogRepository(
                             stillUrl = still
                         )
                     }
+                    seasonEpisodesMemoryCache[cacheKey] = mapped
+                    return@withContext mapped
                 }
             } catch (e: Exception) {
                 Logger.w("CatalogRepo", "Failed to fetch episodes for ${media.title} S$seasonNumber", e)
@@ -803,7 +813,7 @@ class CatalogRepository(
         }
 
         val fallbackCount = media.totalEpisodes.coerceAtLeast(1)
-        (1..fallbackCount).map { epNum ->
+        val fallbackList = (1..fallbackCount).map { epNum ->
             EpisodeRef(
                 seasonNumber = seasonNumber,
                 episodeNumber = epNum,
@@ -812,6 +822,8 @@ class CatalogRepository(
                 stillUrl = media.posterUrl
             )
         }
+        seasonEpisodesMemoryCache[cacheKey] = fallbackList
+        fallbackList
     }
 
     suspend fun searchCatalog(

@@ -124,9 +124,6 @@ object StreamUrlClassifier {
         val lower = url.lowercase()
         if (!lower.startsWith("http") || isBlockedDomain(lower) || isSubtitleUrl(lower)) return false
         if (lower.contains("url=undefined") || lower.endsWith("undefined")) return false
-        // Reject DASH manifests: VidLink's .mpd streams consistently fail playback with
-        // ERROR_CODE_IO_BAD_HTTP_STATUS. Skipping them makes the resolver keep looking for
-        // a playable HLS (.m3u8) / MP4 stream instead of handing the player a dead manifest.
         if (lower.contains(".mpd") || lower.contains("/dash/")) return false
         if (verifiedByContent) return true
         val pathPart = lower.substringBefore("?")
@@ -205,16 +202,16 @@ object SnifferScript {
                                     var finalU = res.url || reqUrl || '';
                                     var cType = (res.headers && res.headers.get) ? (res.headers.get('content-type') || '') : '';
                                     if (finalU.indexOf('http') === 0 && finalU.indexOf('undefined') === -1) {
-                                        if (finalU.indexOf('.m3u8') !== -1 || finalU.indexOf('.mpd') !== -1 || finalU.indexOf('.mp4') !== -1 || finalU.indexOf('get_video?id=') !== -1 || cType.indexOf('mpegurl') !== -1 || cType.indexOf('dash+xml') !== -1) {
+                                        if (finalU.indexOf('.m3u8') !== -1 || finalU.indexOf('.mp4') !== -1 || finalU.indexOf('get_video?id=') !== -1 || cType.indexOf('mpegurl') !== -1) {
                                             if (window.AndroidSniffer) window.AndroidSniffer.reportStream(finalU, location.href, false);
                                         } else {
                                             res.clone().text().then(function(txt) {
                                                 if (!txt) return;
                                                 var t = txt.trim();
-                                                if ((t.indexOf('#EXTM3U') === 0 || t.indexOf('<MPD') !== -1) && window.AndroidSniffer) {
+                                                if (t.indexOf('#EXTM3U') === 0 && window.AndroidSniffer) {
                                                     window.AndroidSniffer.reportStream(finalU, location.href, true);
-                                                } else if (t.indexOf('.m3u8') !== -1 || t.indexOf('.mpd') !== -1) {
-                                                    var m = t.match(/https?:\\?\/\\?\/[^"'\s<>]+\.(?:m3u8|mpd)[^"'\s<>]*/i);
+                                                } else if (t.indexOf('.m3u8') !== -1) {
+                                                    var m = t.match(/https?:\\?\/\\?\/[^"'\s<>]+\.m3u8[^"'\s<>]*/i);
                                                     if (m && m[0] && window.AndroidSniffer) {
                                                         window.AndroidSniffer.reportStream(m[0].replace(/\\\//g, '/'), location.href, false);
                                                     }
@@ -243,11 +240,11 @@ object SnifferScript {
                                 var rUrl = this.responseURL || this.__reqUrl || '';
                                 if (rUrl.indexOf('http') === 0 && rUrl.indexOf('undefined') === -1) {
                                     var body = (typeof this.responseText === 'string') ? this.responseText.trim() : '';
-                                    var isManifest = body.indexOf('#EXTM3U') === 0 || body.indexOf('<MPD') !== -1;
-                                    if (rUrl.indexOf('.m3u8') !== -1 || rUrl.indexOf('.mpd') !== -1 || isManifest) {
+                                    var isManifest = body.indexOf('#EXTM3U') === 0;
+                                    if (rUrl.indexOf('.m3u8') !== -1 || isManifest) {
                                         if (window.AndroidSniffer) window.AndroidSniffer.reportStream(rUrl, location.href, isManifest);
-                                    } else if (body.indexOf('.m3u8') !== -1 || body.indexOf('.mpd') !== -1) {
-                                        var m = body.match(/https?:\\?\/\\?\/[^"'\s<>]+\.(?:m3u8|mpd)[^"'\s<>]*/i);
+                                    } else if (body.indexOf('.m3u8') !== -1) {
+                                        var m = body.match(/https?:\\?\/\\?\/[^"'\s<>]+\.m3u8[^"'\s<>]*/i);
                                         if (m && m[0] && window.AndroidSniffer) {
                                             window.AndroidSniffer.reportStream(m[0].replace(/\\\//g, '/'), location.href, false);
                                         }
@@ -272,8 +269,8 @@ object SnifferScript {
                 var scripts = document.querySelectorAll('script');
                 for (var s = 0; s < scripts.length; s++) {
                     var sc = scripts[s].innerHTML || '';
-                    if (sc.indexOf('.m3u8') !== -1 || sc.indexOf('.mpd') !== -1 || sc.indexOf('.mp4') !== -1 || sc.indexOf('hls') !== -1) {
-                        var hlsMatch = sc.match(/https?:\\?\/\\?\/[^"'\s<>]+\.(?:m3u8|mpd|mp4)[^"'\s<>]*/i);
+                    if (sc.indexOf('.m3u8') !== -1 || sc.indexOf('.mp4') !== -1 || sc.indexOf('hls') !== -1) {
+                        var hlsMatch = sc.match(/https?:\\?\/\\?\/[^"'\s<>]+\.(?:m3u8|mp4)[^"'\s<>]*/i);
                         if (hlsMatch && hlsMatch[0] && window.AndroidSniffer) {
                             var candidate = hlsMatch[0].replace(/\\\//g, '/');
                             if (candidate.indexOf('undefined') === -1) {
@@ -304,7 +301,7 @@ object SnifferScript {
                     }
                 }
 
-                var clickables = document.querySelectorAll('button, a, div[role="button"], .play, .btn-play, .jw-icon-display, .vjs-big-play-button, .plyr__control--overlaid, #play-button, .play-btn');
+                var clickables = document.querySelectorAll('button, a, div[role="button"], .play, .btn-play, .jw-icon-display, .vjs-big-play-button, .plyr__control--overlaid, #play-button, .play-btn, .server, [data-server]');
                 for (var c = 0; c < clickables.length; c++) {
                     var el = clickables[c];
                     var label = (el.innerText || el.getAttribute('aria-label') || el.className || el.id || '').toLowerCase();
@@ -318,7 +315,7 @@ object SnifferScript {
 }
 
 // ==========================================
-// 3. WEBVIEW HOST (Patches A, B, C from Fix1.docx)
+// 3. WEBVIEW HOST
 // ==========================================
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -328,7 +325,9 @@ class WebViewHost(context: Context) {
     private var attachedActivityRef: WeakReference<Activity>? = null
 
     private val containerLayout = FrameLayout(appContext).apply {
-        layoutParams = FrameLayout.LayoutParams(1, 1)
+        layoutParams = FrameLayout.LayoutParams(640, 360)
+        translationX = -2000f
+        translationY = -2000f
         alpha = 0.01f
         visibility = View.VISIBLE
     }
@@ -348,6 +347,7 @@ class WebViewHost(context: Context) {
     var onSubtitleDiscovered: ((generation: Int, subUrl: String, label: String?) -> Unit)? = null
     var onStreamCaptured: ((generation: Int, streamUrl: String, headers: Map<String, String>, fallbackReferer: String?, verifiedByContent: Boolean) -> Unit)? = null
     var onPageStartedCallback: ((generation: Int, url: String) -> Unit)? = null
+    var onMainFrameErrorCallback: ((generation: Int, errorCode: Int, failingUrl: String) -> Unit)? = null
 
     fun attachToActivity(activity: Activity) {
         mainHandler.post {
@@ -360,7 +360,7 @@ class WebViewHost(context: Context) {
                     }
                 }
                 if (containerLayout.parent == null) {
-                    decorGroup.addView(containerLayout, FrameLayout.LayoutParams(1, 1))
+                    decorGroup.addView(containerLayout, FrameLayout.LayoutParams(640, 360))
                 }
             } catch (e: Exception) {
                 Logger.w("WebViewHost", "Could not attach containerLayout to activity", e)
@@ -413,15 +413,19 @@ class WebViewHost(context: Context) {
         }
     }
 
-    // PATCH A from Fix1.docx: One unified SniffClient used by BOTH primary WebView and every popup WebView
     private inner class SniffClient(
         private val isPopup: Boolean,
         private val boundGeneration: Int
     ) : WebViewClient() {
 
+        @Volatile private var lastKnownPageUrl: String? = null
+
         override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
             super.onPageStarted(view, url, favicon)
             if (isDestroyed || boundGeneration != activeGeneration.get()) return
+            if (!url.isNullOrBlank() && url != "about:blank") {
+                lastKnownPageUrl = url
+            }
             if (!isPopup) {
                 onPageStartedCallback?.invoke(boundGeneration, url.orEmpty())
             } else {
@@ -436,6 +440,9 @@ class WebViewHost(context: Context) {
         override fun onPageFinished(view: WebView?, url: String?) {
             super.onPageFinished(view, url)
             if (isDestroyed || boundGeneration != activeGeneration.get()) return
+            if (!url.isNullOrBlank() && url != "about:blank") {
+                lastKnownPageUrl = url
+            }
             view?.let { safeEvaluateJs(it, SnifferScript.SCRIPT) }
             if (!isPopup) {
                 mainHandler.removeCallbacks(automationRunnable)
@@ -456,19 +463,27 @@ class WebViewHost(context: Context) {
             val u = request?.url?.toString().orEmpty()
             if (!u.startsWith("http")) return true
             if (StreamUrlClassifier.isBlockedDomain(u)) {
-                return true // Swallow ad hops
+                return true
             }
             if (StreamUrlClassifier.isPlayableVideoStream(u)) {
                 reportCapture(u, view)
             }
-            // Return false so the popup or main WebView ACTUALLY loads the player page!
             return false
         }
 
         override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
             super.onReceivedError(view, request, error)
             if (request?.isForMainFrame == true) {
-                Logger.w("WebViewHost", "MainFrame error (isPopup=$isPopup, code=${error?.errorCode}): ${error?.description} on ${request.url}")
+                val errCode = error?.errorCode ?: 0
+                val failingUrl = request.url?.toString().orEmpty()
+                Logger.w("WebViewHost", "MainFrame error (isPopup=$isPopup, code=$errCode): ${error?.description} on $failingUrl")
+                if (!isPopup && errCode in listOf(-2, -6, -8, -11, -15)) {
+                    mainHandler.post {
+                        if (!isDestroyed && boundGeneration == activeGeneration.get()) {
+                            onMainFrameErrorCallback?.invoke(boundGeneration, errCode, failingUrl)
+                        }
+                    }
+                }
             }
         }
 
@@ -503,10 +518,16 @@ class WebViewHost(context: Context) {
             val acceptHeader = reqHeaders.entries.firstOrNull { it.key.equals("Accept", true) }?.value
             if (StreamUrlClassifier.isPlayableVideoStream(reqUrl, null, acceptHeader, false)) {
                 val headersCopy = HashMap(reqHeaders)
+                // If Chromium sent a sub-iframe Origin or Referer, use that exact sub-iframe URL as fallbackReferer!
+                val subFrameReferer = reqHeaders.entries.firstOrNull { it.key.equals("Referer", true) }?.value
+                    ?: reqHeaders.entries.firstOrNull { it.key.equals("Origin", true) }?.value?.let { "$it/" }
+                val cachedPageUrl = lastKnownPageUrl
                 mainHandler.post {
                     if (!isDestroyed && boundGeneration == activeGeneration.get()) {
-                        val liveViewUrl = try { view?.url } catch (_: Exception) { null }
-                        onStreamCaptured?.invoke(boundGeneration, reqUrl, headersCopy, liveViewUrl, false)
+                        val bestReferer = subFrameReferer?.takeIf { it.startsWith("http") }
+                            ?: try { view?.url?.takeIf { it.startsWith("http") } } catch (_: Exception) { null }
+                            ?: cachedPageUrl
+                        onStreamCaptured?.invoke(boundGeneration, reqUrl, headersCopy, bestReferer, false)
                     }
                 }
             }
@@ -514,16 +535,20 @@ class WebViewHost(context: Context) {
         }
 
         private fun reportCapture(url: String, view: WebView?) {
+            val cachedPageUrl = lastKnownPageUrl
             mainHandler.post {
                 if (!isDestroyed && boundGeneration == activeGeneration.get()) {
-                    val liveViewUrl = try { view?.url } catch (_: Exception) { null }
+                    val liveViewUrl = try {
+                        view?.url?.takeIf { it.startsWith("http") }
+                    } catch (_: Exception) {
+                        null
+                    } ?: cachedPageUrl
                     onStreamCaptured?.invoke(boundGeneration, url, emptyMap(), liveViewUrl, false)
                 }
             }
         }
     }
 
-    // PATCH C from Fix1.docx: Shared WebChromeClient that creates full sniffing popups and doesn't kill them at 250ms
     private val sniffChromeClient = object : WebChromeClient() {
         override fun onCreateWindow(
             view: WebView?,
@@ -543,7 +568,6 @@ class WebViewHost(context: Context) {
             containerLayout.addView(popupWv)
             transport.webView = popupWv
             resultMsg.sendToTarget()
-            // 9,000ms backstop only — silenceAndStopOnMain() reaps popups cleanly when the candidate finishes
             safeDestroyPopupLater(popupWv, 9_000L)
             return true
         }
@@ -556,10 +580,9 @@ class WebViewHost(context: Context) {
         }
     }
 
-    // PATCH B from Fix1.docx: Unified WebView factory used by both primary and popup WebViews
     @SuppressLint("JavascriptInterface")
     private fun buildWebView(isPopup: Boolean, generation: Int): WebView = WebView(appContext).apply {
-        layoutParams = FrameLayout.LayoutParams(1, 1)
+        layoutParams = FrameLayout.LayoutParams(640, 360)
         val cm = CookieManager.getInstance()
         cm.setAcceptCookie(true)
         cm.setAcceptThirdPartyCookies(this, true)
@@ -592,7 +615,7 @@ class WebViewHost(context: Context) {
             val decor = act.window?.decorView as? ViewGroup
             if (decor != null && containerLayout.parent == null) {
                 try {
-                    decor.addView(containerLayout, FrameLayout.LayoutParams(1, 1))
+                    decor.addView(containerLayout, FrameLayout.LayoutParams(640, 360))
                 } catch (_: Exception) {}
             }
         }
@@ -632,10 +655,27 @@ class WebViewHost(context: Context) {
         } catch (_: Exception) {}
     }
 
+    fun resetBetweenCandidatesOnMain() {
+        activeGeneration.incrementAndGet()
+        mainHandler.post {
+            mainHandler.removeCallbacks(automationRunnable)
+            popupWebViews.toList().forEach { popup ->
+                safeDestroyPopupLater(popup, 0L)
+            }
+            primaryWebView?.let { wv ->
+                if (!isDestroyed) {
+                    try {
+                        wv.stopLoading()
+                        wv.loadUrl("about:blank")
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+    }
+
     fun loadCandidateOnMain(generation: Int, url: String, headers: Map<String, String>) {
         activeGeneration.set(generation)
         mainHandler.post {
-            // Reap any leftover popups from the previous candidate so they cannot contaminate this candidate
             popupWebViews.toList().forEach { popup ->
                 safeDestroyPopupLater(popup, 0L)
             }
@@ -676,7 +716,7 @@ class WebViewHost(context: Context) {
 }
 
 // ==========================================
-// 4. WEBVIEW STREAM RESOLVER (Patches D & E from Fix1.docx)
+// 4. WEBVIEW STREAM RESOLVER
 // ==========================================
 
 class WebViewStreamResolver(
@@ -732,9 +772,9 @@ class WebViewStreamResolver(
 
                 val firstSent = AtomicBoolean(false)
                 val currentCandidateResolved = AtomicBoolean(false)
+                val currentCandidateAborted = AtomicBoolean(false)
                 val childIframeQueuedForCurrent = AtomicBoolean(false)
 
-                // PATCH D from Fix1.docx: Defer early preroll captures instead of dropping them forever
                 var pendingPreroll: ResolvedStream? = null
                 var pendingPrerollAtMs = 0L
 
@@ -774,6 +814,8 @@ class WebViewStreamResolver(
                 }
 
                 fun emitResolved(resolved: ResolvedStream) {
+                    if (!currentCandidateResolved.compareAndSet(false, true)) return
+
                     streamCache.put(
                         mediaId = plan.media.id,
                         season = plan.episode?.seasonNumber,
@@ -781,15 +823,15 @@ class WebViewStreamResolver(
                         stream = resolved
                     )
                     providerRegistry.recordOutcome(resolved.providerId, success = true)
-                    Logger.i(tag, "CAPTURED stream=${resolved.streamUrl} mime=${resolved.mimeType} via=${resolved.serverLabel}")
+                    Logger.i(tag, "CAPTURED stream=${resolved.streamUrl} mime=${resolved.mimeType} via=${resolved.serverLabel} referer=${resolved.headers["Referer"]}")
 
-                    currentCandidateResolved.set(true)
                     if (!harvestAll) {
                         if (firstSent.compareAndSet(false, true)) {
                             webViewHost.silenceAndStopOnMain()
                             trySend(ResolverEvent.Captured(resolved))
                         }
                     } else {
+                        webViewHost.resetBetweenCandidatesOnMain()
                         trySend(ResolverEvent.Captured(resolved))
                     }
                 }
@@ -797,6 +839,12 @@ class WebViewStreamResolver(
                 webViewHost.onPageStartedCallback = { gen, _ ->
                     if (gen == currentGeneration) {
                         pageStartedAtMs = System.currentTimeMillis()
+                    }
+                }
+
+                webViewHost.onMainFrameErrorCallback = { gen, _, _ ->
+                    if (gen == currentGeneration) {
+                        currentCandidateAborted.set(true)
                     }
                 }
 
@@ -816,7 +864,7 @@ class WebViewStreamResolver(
                 }
 
                 webViewHost.onIframeDiscovered = { gen, iframeUrl, parentUrl ->
-                    if (gen == currentGeneration) {
+                    if (gen == currentGeneration && !currentCandidateResolved.get()) {
                         val currentCandidate = queue.getOrNull(currentIndex)
                         if (currentCandidate != null && queue.none { it.embedUrl == iframeUrl } && queue.size < 20) {
                             val enrichedLabel = providerRegistry.enrichHostLabel(iframeUrl, currentCandidate.label)
@@ -840,7 +888,7 @@ class WebViewStreamResolver(
                 }
 
                 webViewHost.onStreamCaptured = { gen, rawStreamUrl, chromiumHeaders, fallbackReferer, verifiedByContent ->
-                    if (gen == currentGeneration) {
+                    if (gen == currentGeneration && !currentCandidateResolved.get()) {
                         val activeCandidate = queue.getOrNull(currentIndex)
                         if (activeCandidate != null) {
                             val unwrapped = StreamUrlClassifier.unwrapStreamUrl(rawStreamUrl)
@@ -851,7 +899,6 @@ class WebViewStreamResolver(
                                         !verifiedByContent &&
                                         !activeCandidate.isInstantTrusted
 
-                                // PATCH D from Fix1.docx
                                 if (skipAsPreroll) {
                                     if (pendingPreroll == null) {
                                         Logger.d(tag, "Deferring early stream (${sinceStart}ms) for settle check: $unwrapped")
@@ -874,6 +921,7 @@ class WebViewStreamResolver(
                     val candidate = queue[currentIndex]
                     triedProviders.add(candidate.providerId)
                     currentCandidateResolved.set(false)
+                    currentCandidateAborted.set(false)
                     childIframeQueuedForCurrent.set(false)
                     pendingPreroll = null
                     pendingPrerollAtMs = 0L
@@ -898,6 +946,11 @@ class WebViewStreamResolver(
                         }
                     }
 
+                    if (currentIndex > 0) {
+                        webViewHost.resetBetweenCandidatesOnMain()
+                        delay(200L)
+                    }
+
                     trySend(ResolverEvent.Progress(currentIndex + 1, queue.size, candidate.label))
                     Logger.d(tag, "Resolving [${currentIndex + 1}/${queue.size}]: ${candidate.label} -> ${candidate.embedUrl}")
 
@@ -910,15 +963,13 @@ class WebViewStreamResolver(
 
                     while (System.currentTimeMillis() - startMs < timeoutMs) {
                         if (!harvestAll && firstSent.get()) break
-                        if (currentCandidateResolved.get()) {
-                            if (!harvestAll) break
-                            if (System.currentTimeMillis() - startMs >= 1_200L) break
+                        if (currentCandidateResolved.get() || currentCandidateAborted.get()) {
+                            break
                         }
-                        if (childIframeQueuedForCurrent.get() && System.currentTimeMillis() - startMs >= 2_200L) {
+                        if (childIframeQueuedForCurrent.get() && System.currentTimeMillis() - startMs >= 1_200L) {
                             Logger.d(tag, "Hopping immediately into discovered child iframe for ${candidate.label}")
                             break
                         }
-                        // PATCH D from Fix1.docx: Accept pendingPreroll after 1,400ms if no newer manifest replaced it
                         val pending = pendingPreroll
                         if (pending != null && System.currentTimeMillis() - pendingPrerollAtMs > 1_400L && !firstSent.get()) {
                             Logger.d(tag, "Preroll window closed with no better capture — accepting ${pending.streamUrl}")
@@ -926,10 +977,9 @@ class WebViewStreamResolver(
                             emitResolved(pending)
                             break
                         }
-                        delay(150L)
+                        delay(120L)
                     }
 
-                    // Final check if a pendingPreroll is still waiting when the loop ends
                     val leftoverPending = pendingPreroll
                     if (leftoverPending != null && !currentCandidateResolved.get() && !firstSent.get()) {
                         pendingPreroll = null
@@ -937,9 +987,10 @@ class WebViewStreamResolver(
                     }
 
                     if (!currentCandidateResolved.get() && !childIframeQueuedForCurrent.get() && !firstSent.get()) {
-                        Logger.w(tag, "Candidate timed out after ${timeoutMs}ms: ${candidate.label}")
+                        val reason = if (currentCandidateAborted.get()) FailReason.NETWORK else FailReason.TIMEOUT
+                        Logger.w(tag, "Candidate failed ($reason): ${candidate.label}")
                         providerRegistry.recordOutcome(candidate.providerId, success = false)
-                        trySend(ResolverEvent.CandidateFailed(candidate.providerId, FailReason.TIMEOUT))
+                        trySend(ResolverEvent.CandidateFailed(candidate.providerId, reason))
                     }
 
                     currentIndex++
@@ -959,7 +1010,6 @@ class WebViewStreamResolver(
         }
     }
 
-    // PATCH E from Fix1.docx: Prioritize live page / popup fallbackReferer over static parent candidate Referer
     private fun buildStreamHeaders(
         activeCandidate: ServerCandidate,
         chromiumHeaders: Map<String, String>,
@@ -981,15 +1031,19 @@ class WebViewStreamResolver(
         }
 
         if (!activeCandidate.omitReferer) {
-            val referer = chromiumHeaders.entries.firstOrNull { it.key.equals("Referer", true) }?.value?.takeIf { it.isNotBlank() }
+            val chromiumRef = chromiumHeaders.entries.firstOrNull { it.key.equals("Referer", true) }?.value?.takeIf { it.isNotBlank() }
+            val chromiumOrigin = chromiumHeaders.entries.firstOrNull { it.key.equals("Origin", true) }?.value?.takeIf { it.isNotBlank() }
+
+            val referer = chromiumRef
+                ?: chromiumOrigin?.let { if (it.endsWith("/")) it else "$it/" }
                 ?: fallbackReferer?.takeIf { it.startsWith("http") }
-                ?: activeCandidate.headers["Referer"]
-                ?: activeCandidate.embedUrl
+                ?: activeCandidate.embedUrl.takeIf { it.startsWith("http") }
+                ?: activeCandidate.headers["Referer"].orEmpty()
 
             if (referer.isNotBlank()) {
                 result["Referer"] = referer
                 if (result.keys.none { it.equals("Origin", true) }) {
-                    val origin = try {
+                    val origin = chromiumOrigin ?: try {
                         val u = URI(referer)
                         if (u.scheme != null && u.host != null) "${u.scheme}://${u.host}" else null
                     } catch (_: Exception) {
