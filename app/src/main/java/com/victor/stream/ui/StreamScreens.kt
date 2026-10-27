@@ -475,6 +475,13 @@ fun HomeScreenWithSidebar(
     var focusedDrawerIndex by remember { mutableIntStateOf(-1) }
     var suppressAutoOpenUntil by remember { mutableLongStateOf(0L) }
 
+    // Every time this screen appears (first launch, or returning from a movie/details), focus
+    // bounces briefly onto the ☰ button before the remembered poster grabs it. Suppress the
+    // auto-open during that settling window so leaving a poster never pops the sidebar.
+    LaunchedEffect(Unit) {
+        suppressAutoOpenUntil = System.currentTimeMillis() + 1600L
+    }
+
     fun closeDrawerAndRestoreFocus(newSection: Boolean) {
         // Don't let the ☰ button re-open the drawer while focus is travelling back
         suppressAutoOpenUntil = System.currentTimeMillis() + 900L

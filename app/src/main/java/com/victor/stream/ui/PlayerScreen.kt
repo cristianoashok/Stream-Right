@@ -17,6 +17,7 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -416,8 +417,19 @@ fun PlayerScreen(
             )
             playbackController.updateSubtitlesList(fetchedSubs)
         }
-        delay(1500L)
-        val dur = playbackController.exoPlayer.duration.coerceAtLeast(0L)
+        // AniSkip validates intro/outro times against the episode's real length, so if we
+        // ask before ExoPlayer knows the duration it returns times for the wrong length and
+        // the skip lands in the middle of the theme song. Wait (up to ~8s) for a real
+        // duration before fetching.
+        var dur = 0L
+        var waited = 0
+        while (dur <= 0L && waited < 16) {
+            dur = playbackController.exoPlayer.duration
+            if (dur > 0L) break
+            delay(500L)
+            waited++
+        }
+        dur = dur.coerceAtLeast(0L)
         val segs = ServiceLocator.catalogRepository.fetchSkipSegments(media, activeEpisode, dur)
         playbackController.setSkipSegments(segs)
     }
@@ -489,6 +501,11 @@ fun PlayerScreen(
     }
 
     val remoteKeyHandler: (KeyEvent) -> Boolean = handler@{ ev ->
+        // The Back/Escape button is owned entirely by the BackHandler composables above, so
+        // never consume it here (consuming it was what sometimes closed the whole player).
+        if (ev.keyCode == KeyEvent.KEYCODE_BACK || ev.keyCode == KeyEvent.KEYCODE_ESCAPE) {
+            return@handler false
+        }
         val isDown = ev.action == KeyEvent.ACTION_DOWN
         val isFirstPress = isDown && ev.repeatCount == 0
         val playerView = playerViewHolder[0]
@@ -549,43 +566,21 @@ fun PlayerScreen(
             }
         }
 
-        val isBack = ev.keyCode == KeyEvent.KEYCODE_BACK || ev.keyCode == KeyEvent.KEYCODE_ESCAPE
+        // (Back is handled by the BackHandler composables, not here.)
 
-        // ---- "Connecting servers..." overlay: Back cancels it ----
+        // ---- "Connecting servers..." overlay: let other keys pass through ----
         if (isResolvingOverlay) {
-            if (isBack) {
-                if (ev.action == KeyEvent.ACTION_UP) {
-                    activeResolverJob?.cancel()
-                    ServiceLocator.streamResolver.cancelActive()
-                    isResolvingOverlay = false
-                }
-                return@handler true
-            }
             return@handler false
         }
 
-        // ---- Settings panel open: arrows move inside it, Back steps out ----
+        // ---- Settings panel open: arrows move inside it ----
         if (showRightSettingsSheet) {
-            if (isBack) {
-                if (ev.action == KeyEvent.ACTION_UP) {
-                    if (settingsTab != "Main") settingsTab = "Main" else showRightSettingsSheet = false
-                }
-                return@handler true
-            }
             return@handler false
         }
 
-        // ---- Control bar visible: Back just hides it (feels like "nothing happened"),
-        //      a second Back with the bar already hidden exits the player as normal. ----
-        // Treat the bar as visible if EITHER signal says so, so the very first Back right
-        // after entering (while the controls are still fading in) hides instead of exiting.
+        // ---- Control bar visible: arrows move between buttons; any key keeps it up ----
         val barVisible = controllerVisible || (playerView?.isControllerFullyVisible == true)
         if (barVisible) {
-            if (isBack) {
-                if (ev.action == KeyEvent.ACTION_UP) playerView?.hideController()
-                return@handler true
-            }
-            // Any key keeps the bar on screen a little longer
             if (isDown) playerView?.showController()
             return@handler false
         }
@@ -633,6 +628,25 @@ fun PlayerScreen(
         onDispose {
             if (RemoteKeyRouter.playerHandler === handler) RemoteKeyRouter.playerHandler = null
         }
+    }
+
+    // Back button handling. Uses Compose's BackHandler (not the raw key router) because on
+    // newer Android the Back button is delivered through the back-press dispatcher and never
+    // reaches dispatchKeyEvent — which is why Back was closing the whole player instead of
+    // just the settings panel or the control bar.
+    // Priority: settings panel first, then the "connecting..." overlay, then the control bar.
+    // Only when NONE of those is showing does Back actually leave the player.
+    val controllerShowing = controllerVisible || (playerViewHolder[0]?.isControllerFullyVisible == true)
+    BackHandler(enabled = showRightSettingsSheet) {
+        if (settingsTab != "Main") settingsTab = "Main" else showRightSettingsSheet = false
+    }
+    BackHandler(enabled = !showRightSettingsSheet && isResolvingOverlay) {
+        activeResolverJob?.cancel()
+        ServiceLocator.streamResolver.cancelActive()
+        isResolvingOverlay = false
+    }
+    BackHandler(enabled = !showRightSettingsSheet && !isResolvingOverlay && controllerShowing) {
+        playerViewHolder[0]?.hideController()
     }
 
     // Settings panel: put the remote on its first option whenever it opens / changes page
