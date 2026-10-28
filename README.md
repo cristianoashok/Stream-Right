@@ -7,6 +7,10 @@
 
 A production-grade, high-performance Android media streaming application engineered with modern Android architecture, custom multi-provider resolution pipelines, and an adaptive video player.
 
+<p align="center">
+<img width="1456" height="3510" alt="image" src="https://github.com/user-attachments/assets/790223e4-be97-4b20-ab60-3bd946cb1f2a" />
+</p>
+
 ---
 
 ## 🚀 Key Features
