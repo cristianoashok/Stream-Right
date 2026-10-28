@@ -1,5 +1,10 @@
 # 🎬 Stream (Android Media Streaming Engine)
 
+<p align="center">
+   <img width="1800" height="1160" alt="image" src="https://github.com/user-attachments/assets/8d703400-824c-45e1-967d-dc55a6639e40" />
+   </p>
+
+
 A production-grade, high-performance Android media streaming application engineered with modern Android architecture, custom multi-provider resolution pipelines, and an adaptive video player.
 
 ---
@@ -27,4 +32,19 @@ A production-grade, high-performance Android media streaming application enginee
 
 1. **Clone the repository:**
    ```bash
-   git clone [https://github.com/cristianoashok/Stream-Right.git](https://github.com/cristianoashok/Stream-Right.git)
+   git clone https://github.com/cristianoashok/Stream-Right.git
+   ```
+
+2. **Configure Credentials:**
+   Create a `local.properties` file in the root directory of the project and add your TMDB API key:
+   ```properties
+   TMDB_API_KEY=your_actual_tmdb_api_key_here
+   ```
+
+3. **Run the App:**
+   Open the project in Android Studio, allow Gradle to sync, and run it on your emulator or physical device.
+
+---
+
+## 📄 License
+This project is built for portfolio and educational demonstration purposes.
