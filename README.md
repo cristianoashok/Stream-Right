@@ -25,20 +25,6 @@ A production-grade, high-performance Android media streaming application enginee
 
 ## ⚙️ Getting Started & Setup
 
-1. Clone the repository:
+1. **Clone the repository:**
    ```bash
    git clone [https://github.com/cristianoashok/Stream-Right.git](https://github.com/cristianoashok/Stream-Right.git)
-
-Create a local.properties file in the root directory and add your TMDB API key:
-
-Properties
-TMDB_API_KEY=your_actual_tmdb_api_key_here
-Open the project in Android Studio, sync Gradle, and run.
-
-
-Save the file, push it to GitHub with:
-```bash
-git commit -am "docs: clean up clone command markdown syntax"
-git push -u public public-portfolio:main
-
-
