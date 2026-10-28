@@ -54,7 +54,7 @@ class ProviderRegistry {
     @Volatile var lastWorkingGeneralProviderId: String = "vidfast"
 
     private val descriptors: List<ProviderDescriptor> = listOf(
-        // --- MOVIE & TV PROVIDERS (All Verified Unblocked & Working) ---
+        // --- MOVIE & TV PROVIDERS (All Verified Working & Unblocked) ---
         ProviderDescriptor(
             id = "vidfast",
             label = "VidFast (Instant HD)",
@@ -126,21 +126,21 @@ class ProviderRegistry {
             baseReliability = 0.91f
         ),
         ProviderDescriptor(
-            id = "multiembed_vip",
-            label = "SuperEmbed VIP (Multi-Host)",
+            id = "nextgen_direct",
+            label = "NextGen Cloud HD (Direct Engine)",
             supportedKinds = setOf(MediaKind.MOVIE, MediaKind.TV),
             idType = IdType.TMDB,
-            movieUrlTemplate = "https://multiembed.mov/directstream.php?video_id={id}&tmdb=1",
-            seriesUrlTemplate = "https://multiembed.mov/directstream.php?video_id={id}&tmdb=1&s={s}&e={e}",
-            headerProfile = HeaderProfile("https://multiembed.mov/", "https://multiembed.mov"),
+            movieUrlTemplate = "https://nextgencloudfabric.com/embed/movie/{id}",
+            seriesUrlTemplate = "https://nextgencloudfabric.com/embed/tv/{id}/{s}/{e}/",
+            headerProfile = HeaderProfile("https://player.autoembed.me/", "https://player.autoembed.me"),
             requiresPopup = true,
             trust = ProviderTrust.SETTLE,
             timeoutMs = 8_000L,
             hedgeDelayMs = 3_000L,
-            baseReliability = 0.89f
+            baseReliability = 0.90f
         ),
 
-        // --- ANIME PROVIDERS (All Working in Log_4.txt) ---
+        // --- ANIME PROVIDERS ---
         ProviderDescriptor(
             id = "megaplay_ani_sub",
             label = "MegaPlay AniList (Sub)",
@@ -266,7 +266,6 @@ class ProviderRegistry {
         val host = when {
             l.contains("autoembed") || l.contains("nextgencloudfabric") -> "CloudFabric"
             l.contains("vsembed") || l.contains("stellarconductor") -> "VsEmbed"
-            l.contains("multiembed") || l.contains("streamingnow") -> "SuperEmbed"
             l.contains("vidsrc.to") -> "VidSrc.to"
             l.contains("megaplay") || l.contains("megacloud") || l.contains("nexabloom") -> "MegaPlay"
             l.contains("vidfast") || l.contains("goldenkite") || l.contains("finalsignal") -> "VidFast"
