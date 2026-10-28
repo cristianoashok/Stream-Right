@@ -1,7 +1,7 @@
 # 🎬 Stream (Android Media Streaming Engine)
 
 <p align="center">
-   <img width="1800" height="1160" alt="image" src="https://github.com/user-attachments/assets/8d703400-824c-45e1-967d-dc55a6639e40" />
+   <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/0b666769-9f37-43c6-9774-5b9d134ce9ac" />
    </p>
 
 
