@@ -26,5 +26,7 @@ A production-grade, high-performance Android media streaming application enginee
 ## ⚙️ Getting Started & Setup
 
 1. Clone the repository:
-   ```bash
-   git clone [https://github.com/cristianoashok/Stream-Right.git](https://github.com/cristianoashok/Stream-Right.git)
+  ```bash
+git clone [https://github.com/cristianoashok/Stream-Right.git](https://github.com/cristianoashok/Stream-Right.git)
+
+
