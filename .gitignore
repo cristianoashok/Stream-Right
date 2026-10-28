@@ -1,15 +1,24 @@
 *.iml
 .gradle
 /local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+local.properties
+
+# Android Studio / IntelliJ IDE files
+.idea/
+*.iws
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# Build outputs
 /build
+app/build/
 /captures
 .externalNativeBuild
 .cxx
-local.properties
+
+# Release signing keys
+*.jks
+*.keystore
+release/
